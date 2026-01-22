@@ -20,4 +20,4 @@ workflow.add_edge("generate", END)
 
 
 app = workflow.compile()
-print("Graph ready ✅")
+print("Graph ready")

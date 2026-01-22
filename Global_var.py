@@ -7,9 +7,9 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 load_dotenv()
 
 if os.getenv("GOOGLE_API_KEY"):
-    print("✅ Google API Key loaded")
+    print("Google API Key loaded")
 else:
-    print("❌ Google API Key missing")
+    print("Google API Key missing")
 
 # Global Rate Limiters for Google Generative AI API
 # Gemini Embeddings
