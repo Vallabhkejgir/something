@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RAG Query Interface</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 20px;
+      }
+
+      .container {
+        background: white;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        max-width: 900px;
+        width: 100%;
+        padding: 40px;
+      }
+
+      header {
+        text-align: center;
+        margin-bottom: 40px;
+      }
+
+      h1 {
+        color: #333;
+        font-size: 32px;
+        margin-bottom: 10px;
+      }
+
+      .subtitle {
+        color: #666;
+        font-size: 16px;
+      }
+
+      .form-section {
+        margin-bottom: 30px;
+      }
+
+      .form-section h2 {
+        color: #333;
+        font-size: 18px;
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .step-number {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        font-weight: bold;
+      }
+
+      .input-group {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+      }
+
+      input[type="text"],
+      textarea {
+        flex: 1;
+        padding: 12px 16px;
+        border: 2px solid #e0e0e0;
+        border-radius: 10px;
+        font-size: 14px;
+        font-family: inherit;
+        transition: border-color 0.3s;
+      }
+
+      input[type="text"]:focus,
+      textarea:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+
+      button {
+        padding: 12px 24px;
+        border: none;
+        border-radius: 10px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.3s;
+      }
+
+      .btn-load {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+
+      .btn-load:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+      }
+
+      .btn-load:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .btn-submit {
+        background: #10b981;
+        color: white;
+        width: 100%;
+      }
+
+      .btn-submit:hover:not(:disabled) {
+        background: #059669;
+        transform: translateY(-2px);
+        box-shadow: 0 10px 20px rgba(16, 185, 129, 0.4);
+      }
+
+      .btn-submit:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      .status-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        background: #f3f4f6;
+        border-radius: 20px;
+        font-size: 13px;
+        color: #666;
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #ef4444;
+        animation: pulse 2s infinite;
+      }
+
+      .status-dot.ready {
+        background: #10b981;
+        animation: none;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+
+      .response-section {
+        margin-top: 40px;
+      }
+
+      .response-box {
+        background: #f9fafb;
+        border: 2px solid #e5e7eb;
+        border-radius: 10px;
+        padding: 20px;
+        margin-top: 15px;
+      }
+
+      .answer {
+        color: #333;
+        line-height: 1.6;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+      }
+
+      .loading {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: #667eea;
+        margin: 20px 0;
+      }
+
+      .spinner {
+        width: 20px;
+        height: 20px;
+        border: 3px solid #f3f4f6;
+        border-top-color: #667eea;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+
+      .error {
+        background: #fee;
+        border: 2px solid #fcc;
+        color: #c33;
+        padding: 12px 16px;
+        border-radius: 10px;
+        margin-top: 15px;
+      }
+
+      .success {
+        background: #efe;
+        border: 2px solid #cfc;
+        color: #3c3;
+        padding: 12px 16px;
+        border-radius: 10px;
+        margin-top: 15px;
+      }
+
+      .info-text {
+        color: #999;
+        font-size: 13px;
+        margin-top: 5px;
+      }
+
+      .divider {
+        height: 2px;
+        background: #e5e7eb;
+        margin: 30px 0;
+      }
+
+      @media (max-width: 600px) {
+        .container { padding: 20px; }
+        h1 { font-size: 24px; }
+        .input-group { flex-direction: column; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>🤖 RAG Query Interface</h1>
+        <p class="subtitle">Retrieve and generate answers from your documents</p>
+      </header>
+
+      <div class="form-section">
+        <h2>
+          <span class="step-number">1</span>
+          Load Documents
+        </h2>
+        <div class="input-group">
+          <input
+            type="text"
+            id="docUrl"
+            placeholder="Enter document URL (e.g., https://example.com)..."
+          />
+          <button class="btn-load" id="loadBtn">Load Documents</button>
+        </div>
+        <p class="info-text">Documents will be chunked and indexed into FAISS.</p>
+        <div id="loadStatus"></div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="form-section">
+        <h2>
+          <span class="step-number">2</span>
+          Ask a Question
+        </h2>
+        <div class="status-indicator">
+          <span class="status-dot" id="statusDot"></span>
+          <span id="statusText">Checking status...</span>
+        </div>
+        <div style="margin-top: 15px">
+          <textarea
+            id="prompt"
+            placeholder="Enter your question here..."
+            disabled
+          ></textarea>
+        </div>
+        <button class="btn-submit" id="submitBtn" disabled>Submit Query</button>
+      </div>
+
+      <div class="response-section" id="responseSection" style="display: none">
+        <div class="divider"></div>
+        <h2>
+          <span class="step-number">3</span>
+          Answer
+        </h2>
+        <div id="loadingIndicator" class="loading" style="display: none">
+          <div class="spinner"></div>
+          <span>Processing your query...</span>
+        </div>
+        <div class="response-box" id="responseBox" style="display: none">
+          <div class="answer" id="answer"></div>
+        </div>
+        <div id="errorBox"></div>
+      </div>
+    </div>
+
+    <script>
+      const docUrlInput = document.getElementById("docUrl");
+      const loadBtn = document.getElementById("loadBtn");
+      const promptInput = document.getElementById("prompt");
+      const submitBtn = document.getElementById("submitBtn");
+      const statusDot = document.getElementById("statusDot");
+      const statusText = document.getElementById("statusText");
+      const loadStatus = document.getElementById("loadStatus");
+      const responseSection = document.getElementById("responseSection");
+      const loadingIndicator = document.getElementById("loadingIndicator");
+      const responseBox = document.getElementById("responseBox");
+      const errorBox = document.getElementById("errorBox");
+      const answerDiv = document.getElementById("answer");
+
+      // Initial check
+      checkStatus();
+
+      async function checkStatus() {
+        try {
+          const response = await fetch("/api/status");
+          const data = await response.json();
+          if (data.initialized) {
+            enableQueryMode();
+          } else {
+            enableLoadMode();
+          }
+        } catch (error) {
+          enableLoadMode();
+        }
+      }
+
+      function enableLoadMode() {
+        statusDot.classList.remove("ready");
+        statusText.textContent = "Ready to load documents";
+        docUrlInput.disabled = false;
+        loadBtn.disabled = false;
+        promptInput.disabled = true;
+        submitBtn.disabled = true;
+      }
+
+      function enableQueryMode() {
+        statusDot.classList.add("ready");
+        statusText.textContent = "Documents loaded and ready";
+        docUrlInput.disabled = true;
+        loadBtn.disabled = true;
+        promptInput.disabled = false;
+        submitBtn.disabled = false;
+      }
+
+      loadBtn.addEventListener("click", async () => {
+        const url = docUrlInput.value.trim();
+        if (!url) return;
+
+        loadBtn.disabled = true;
+        loadStatus.innerHTML = '<div class="loading"><div class="spinner"></div><span>Indexing...</span></div>';
+
+        try {
+          const res = await fetch("/api/initialize", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ doc_url: url }),
+          });
+          if (res.ok) {
+            loadStatus.innerHTML = '<div class="success">✓ Success!</div>';
+            enableQueryMode();
+          } else {
+            const err = await res.json();
+            loadStatus.innerHTML = `<div class="error">${err.error}</div>`;
+            loadBtn.disabled = false;
+          }
+        } catch (e) {
+          loadStatus.innerHTML = `<div class="error">${e.message}</div>`;
+          loadBtn.disabled = false;
+        }
+      });
+
+      submitBtn.addEventListener("click", async () => {
+        const prompt = promptInput.value.trim();
+        if (!prompt) return;
+
+        responseSection.style.display = "block";
+        loadingIndicator.style.display = "flex";
+        responseBox.style.display = "none";
+        errorBox.innerHTML = "";
+        submitBtn.disabled = true;
+
+        try {
+          const res = await fetch("/api/query", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt }),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            answerDiv.textContent = data.answer;
+            responseBox.style.display = "block";
+          } else {
+            errorBox.innerHTML = `<div class="error">${data.error}</div>`;
+          }
+        } catch (e) {
+          errorBox.innerHTML = `<div class="error">${e.message}</div>`;
+        } finally {
+          loadingIndicator.style.display = "none";
+          submitBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
