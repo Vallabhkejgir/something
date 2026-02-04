@@ -1,6 +1,6 @@
 from langchain_core.output_parsers import StrOutputParser
 from app.services.llm_config import llm, GEN_LLM_LIMITER
-from app.RAG.prompts import prompt, rewrite_prompt, decompose_prompt
+from app.RAG.prompts import prompt, rewrite_prompt, decompose_prompt, categorize_prompt
 from app.services import storage
 
 async def rewrite_query(state):
@@ -19,14 +19,17 @@ async def retrieve_context(state):
         raise ValueError("Vector Store not initialized")
     
     retriever = storage.vector_store.as_retriever(search_kwargs={"k": 5})
+    
+    # Check if we have transformed queries; if not, use the original question
     queries = state.get("rewritten_queries", []) + state.get("sub_queries", [])
+    if not queries:
+        queries = [state["question"]]
     
     all_docs = []
     for q in queries:
         docs = await retriever.ainvoke(q)
         all_docs.extend(docs)
     
-    # Deduplicate
     context = "\n\n".join(set([d.page_content for d in all_docs]))
     return {"context": context}
 
@@ -40,3 +43,13 @@ async def generate_answer(state):
         "question": state["question"]
     })
     return {"answer": ans}
+
+
+async def categorize_question(state):
+    print("---NODE: CATEGORIZE---")
+    # Invoke the LLM to get the category
+    res = await (categorize_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
+    category = res.strip().lower()
+    # We store the category in the state (update states.py if you want strict typing)
+    return {"category": category}
+
