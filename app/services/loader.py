@@ -1,16 +1,24 @@
-from langchain_community.document_loaders import WebBaseLoader
+from langchain_community.document_loaders import WebBaseLoader, PyPDFLoader, TextLoader
 
-def Doc_loader(url=None):
+def Doc_loader(source: str | None = None, source_type: str = "url"):
     """
-    Load documents from a URL using WebBaseLoader.
-    If no URL is provided, uses the default example URL.
+    Load documents from various sources.
+    source: URL or local file path.
+    source_type: "url", "pdf", or "txt".
     """
-    if url is None:
-        url = ""
-    
-    print(f"📄 Loading documents from: {url}")
+    if source is None:
+        raise ValueError("source cannot be None")
+    print(f"📄 Loading documents from {source_type}: {source}")
     try:
-        loader = WebBaseLoader(url)
+        if source_type == "url":
+            loader = WebBaseLoader(source)
+        elif source_type == "pdf":
+            loader = PyPDFLoader(source)
+        elif source_type == "txt":
+            loader = TextLoader(source)
+        else:
+            raise ValueError(f"Unsupported source type: {source_type}")
+
         docs = loader.load()
         print(f"✅ Loaded {len(docs)} document(s).")
         return docs

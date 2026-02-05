@@ -19,8 +19,6 @@ async def retrieve_context(state):
         raise ValueError("Vector Store not initialized")
     
     retriever = storage.vector_store.as_retriever(search_kwargs={"k": 5})
-    
-    # Check if we have transformed queries; if not, use the original question
     queries = state.get("rewritten_queries", []) + state.get("sub_queries", [])
     if not queries:
         queries = [state["question"]]
@@ -44,12 +42,8 @@ async def generate_answer(state):
     })
     return {"answer": ans}
 
-
 async def categorize_question(state):
     print("---NODE: CATEGORIZE---")
-    # Invoke the LLM to get the category
     res = await (categorize_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
     category = res.strip().lower()
-    # We store the category in the state (update states.py if you want strict typing)
     return {"category": category}
-

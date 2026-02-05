@@ -6,7 +6,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 load_dotenv()
 
 # Models
-model_name = os.getenv("LLM_MODEL", "gemini-1.5-flash")
+model_name = os.getenv("LLM_MODEL", "gemini-2.5-flash")
 llm = ChatGoogleGenerativeAI(model=model_name)
 embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
 

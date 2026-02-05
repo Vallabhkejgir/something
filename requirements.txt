@@ -8,3 +8,4 @@ langgraph
 faiss-cpu
 beautifulsoup4
 langchain-chroma
+pypdf

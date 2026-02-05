@@ -1,4 +1,6 @@
+import os
 import asyncio
+import tempfile
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from app.services.loader import Doc_loader
@@ -19,12 +21,43 @@ def index():
 def initialize():
     global initialized
     try:
-        url = request.json.get('doc_url')
-        docs = Doc_loader(url)
-        chunks = chunk_texts(docs)
-        store_chunks(chunks)
-        initialized = True
-        return jsonify({'status': 'success'})
+        # Check if it's a file upload
+        if 'file' in request.files:
+            file = request.files['file']
+            if not file.filename:
+                return jsonify({'error': 'No file selected'}), 400
+            
+            extension = file.filename.split('.')[-1].lower()
+            if extension not in ['pdf', 'txt']:
+                return jsonify({'error': 'Unsupported file type'}), 400
+
+            # Save file to a temporary location for processing
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{extension}") as tmp_file:
+                file.save(tmp_file.name)
+                tmp_path = tmp_file.name
+
+            try:
+                docs = Doc_loader(tmp_path, source_type=extension)
+                chunks = chunk_texts(docs)
+                store_chunks(chunks)
+                initialized = True
+            finally:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            
+            return jsonify({'status': 'success', 'source': file.filename})
+
+        # Handle URL source
+        else:
+            url = request.json.get('doc_url')
+            if not url:
+                return jsonify({'error': 'No URL or file provided'}), 400
+            docs = Doc_loader(url, source_type="url")
+            chunks = chunk_texts(docs)
+            store_chunks(chunks)
+            initialized = True
+            return jsonify({'status': 'success', 'source': url})
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -36,6 +69,7 @@ def query():
     user_prompt = request.json.get('prompt')
     inputs = GraphState(
             question=user_prompt,
+            category="",
             rewritten_queries=[],   
             sub_queries=[],         
             context="",             
