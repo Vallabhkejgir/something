@@ -7,11 +7,14 @@ from langchain_core.prompts import ChatPromptTemplate
 # Answer:"""
 
 prompt_template = """
-You are a question-answering assistant.
+You are a conversational question-answering assistant.
+Use the provided context AND the conversation history to answer the current question.
 
-Use ONLY the provided context to answer the question.
-If the answer cannot be found in the context, say:
+If the answer cannot be found in the context or history, say:
 "I don't have enough information in the retrieved context."
+
+History:
+{history}
 
 Context:
 {context}
@@ -34,17 +37,16 @@ Do not add external knowledge.
 # """
 
 rewrite_template = """
-You generate search queries for a vector database.
+You are an AI assistant that rephrases user questions to be standalone search queries.
+Given the conversation history and a follow-up question, rephrase the follow-up question 
+into 3 distinct standalone search queries for a vector database.
 
-Generate exactly 3 alternative search queries that:
-- Preserve the original meaning
-- Use different wording or focus on different aspects
-- Are concise (max 12 words each)
+History:
+{history}
 
-Return ONLY a newline-separated list. No numbering. No explanations.
+Follow-up Question: {question}
 
-Original question:
-{question}
+Return ONLY a newline-separated list of 3 standalone queries.
 """
 
 

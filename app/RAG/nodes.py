@@ -3,9 +3,20 @@ from app.services.llm_config import llm, GEN_LLM_LIMITER
 from app.RAG.prompts import prompt, rewrite_prompt, decompose_prompt, categorize_prompt
 from app.services import storage
 
+async def categorize_question(state):
+    print("---NODE: CATEGORIZE---")
+    res = await (categorize_prompt | llm | StrOutputParser()).ainvoke({
+        "question": state["question"],
+        "history": state.get("history", [])
+    })
+    return {"category": res.strip().lower()}
+
 async def rewrite_query(state):
     print("---NODE: REWRITE---")
-    res = await (rewrite_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
+    res = await (rewrite_prompt | llm | StrOutputParser()).ainvoke({
+        "question": state["question"],
+        "history": state.get("history", [])
+    })
     return {"rewritten_queries": [q.strip() for q in res.split("\n") if q.strip()]}
 
 async def decompose_query(state):
@@ -38,12 +49,13 @@ async def generate_answer(state):
     
     ans = await (prompt | llm | StrOutputParser()).ainvoke({
         "context": state["context"], 
-        "question": state["question"]
+        "question": state["question"],
+        "history": state.get("history", [])
     })
-    return {"answer": ans}
-
-async def categorize_question(state):
-    print("---NODE: CATEGORIZE---")
-    res = await (categorize_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
-    category = res.strip().lower()
-    return {"category": category}
+    
+    # We return the answer AND the new history entries
+    new_history = [
+        {"role": "user", "content": state["question"]},
+        {"role": "assistant", "content": ans}
+    ]
+    return {"answer": ans, "history": new_history}
