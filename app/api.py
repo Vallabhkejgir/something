@@ -1,4 +1,5 @@
 import asyncio
+from typing import List
 from flask import Flask, render_template, request, jsonify
 from flask_cors import CORS
 from app.services.loader import Doc_loader
@@ -36,11 +37,13 @@ def query():
     user_prompt = request.json.get('prompt')
     inputs = GraphState(
             question=user_prompt,
+            category="",
             rewritten_queries=[],   
             sub_queries=[],         
             context="",             
             answer=""               
         )
+    
     
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
