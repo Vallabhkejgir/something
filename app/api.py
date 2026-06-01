@@ -36,20 +36,33 @@ def query():
     
     user_prompt = request.json.get('prompt')
     inputs = GraphState(
-            question=user_prompt,
-            category="",
-            rewritten_queries=[],   
-            sub_queries=[],         
-            context="",             
-            answer=""               
-        )
+        question=user_prompt,
+        category="",
+        canonical_question="",
+        adaptive_strategies=[],
+        retrieval_queries=[],
+        rewritten_queries=[],
+        sub_queries=[],
+        graph_focus=[],
+        temporal_focus=[],
+        affordance_focus=[],
+        retrieval_trace=[],
+        context="",
+        answer=""
+    )
     
     
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
         final_state = loop.run_until_complete(rag_app.ainvoke(inputs))
-        return jsonify({'answer': final_state['answer']})
+        return jsonify({
+            'answer': final_state['answer'],
+            'category': final_state.get('category'),
+            'adaptive_strategies': final_state.get('adaptive_strategies', []),
+            'retrieval_queries': final_state.get('retrieval_queries', []),
+            'retrieval_trace': final_state.get('retrieval_trace', [])
+        })
     finally:
         loop.close()
 

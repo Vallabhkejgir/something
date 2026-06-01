@@ -33,17 +33,61 @@ Do not add external knowledge.
 # Original question: {question}
 # """
 
+adaptive_planner_template = """
+You are the query planner for an Adaptive RAG pipeline.
+
+Create a retrieval plan that preserves the user's exact intent. Do not answer
+the question. Return valid JSON only.
+
+Supported strategies:
+- multi_query: use when paraphrases or alternate terminology improve recall.
+- decompose: use when the question has multiple parts or needs multi-hop lookup.
+- grapho1: use when entities, relationships, causes, dependencies, citations,
+  workflows, or comparisons matter. Generate entity/relation-focused queries.
+- tv_rag: use when time, version, sequence, chronology, validity window, or
+  changing facts matter. Generate temporal/version-focused queries.
+- hifi_rag: use when the answer must be high precision, grounded, or filtered
+  against noisy context. Generate exact-evidence queries.
+- affordance_rag: use when the user asks for actions, steps, implementation,
+  configuration, code, decisions, or what can be done with the retrieved material.
+
+Rules for retrieval_queries:
+- Generate 3 to 6 queries.
+- Every query must be a faithful search query for the original question.
+- Include the original question as the first query unless it is too vague.
+- Prefer specific nouns, entities, constraints, dates, versions, and actions.
+- Do not invent facts, names, dates, or technologies not present in the question.
+- Avoid generic queries like "overview", "introduction", or "more information".
+
+Return exactly this JSON shape:
+{{
+  "category": "vague|complex|concise",
+  "strategies": ["multi_query"],
+  "canonical_question": "clear standalone version of the question",
+  "retrieval_queries": ["query one", "query two"],
+  "graph_focus": ["entity or relation focus"],
+  "temporal_focus": ["time/version focus"],
+  "affordance_focus": ["action/capability focus"]
+}}
+
+Question:
+{question}
+"""
+
 rewrite_template = """
-You generate search queries for a vector database.
+Rewrite the user question into focused vector-search queries.
 
-Generate exactly 3 alternative search queries that:
-- Preserve the original meaning
-- Use different wording or focus on different aspects
-- Are concise (max 12 words each)
+Return valid JSON only:
+{{"queries": ["query one", "query two", "query three"]}}
 
-Return ONLY a newline-separated list. No numbering. No explanations.
+Rules:
+- Generate exactly 3 queries.
+- Preserve the original meaning and constraints.
+- Include specific nouns and entities from the question.
+- Do not introduce unrelated topics.
+- Do not number the queries.
 
-Original question:
+Question:
 {question}
 """
 
@@ -107,5 +151,6 @@ categorize_prompt = ChatPromptTemplate.from_template(categorize_template)
 
 
 prompt = ChatPromptTemplate.from_template(prompt_template)
+adaptive_planner_prompt = ChatPromptTemplate.from_template(adaptive_planner_template)
 rewrite_prompt = ChatPromptTemplate.from_template(rewrite_template)
 decompose_prompt = ChatPromptTemplate.from_template(decompose_template)
