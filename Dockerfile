@@ -5,5 +5,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+# Use async-capable gunicorn worker
+RUN pip install --no-cache-dir gunicorn[gevent]
 EXPOSE 5000
-CMD ["python", "app/api.py"]
+CMD ["gunicorn", "-w", "1", "-k", "geventlet", "--timeout", "120", "-b", "0.0.0.0:5000", "app.api:app"]

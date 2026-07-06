@@ -1,16 +1,37 @@
-from typing_extensions import List, TypedDict
+"""
+states.py — Expanded graph state for the advanced RAG pipeline.
 
-class GraphState(TypedDict):
-    question: str
-    category: str           # Added for routing
-    canonical_question: str
-    adaptive_strategies: List[str]
-    retrieval_queries: List[str]
-    rewritten_queries: List[str]
-    sub_queries: List[str]
-    graph_focus: List[str]
-    temporal_focus: List[str]
-    affordance_focus: List[str]
-    retrieval_trace: List[str]
-    context: str
-    answer: str
+Every field is Optional or has a safe default so nodes can be
+added/skipped without breaking the TypedDict schema.
+"""
+
+from typing import List, Optional
+from typing_extensions import TypedDict
+
+
+class GraphState(TypedDict, total=False):
+    # ── Input ─────────────────────────────────────────────────────────────────
+    question: str                      # Original user question
+
+    # ── Query Analysis ────────────────────────────────────────────────────────
+    query_analysis: dict               # QueryAnalysis model serialised as dict
+    retrieval_strategy: str            # Name of chosen strategy
+    search_queries: List[str]          # Primary + variant queries
+
+    # ── Retrieval ─────────────────────────────────────────────────────────────
+    retrieved_documents: List[dict]    # Raw retrieved docs (serialised)
+    graded_documents: List[dict]       # Relevance-filtered docs
+    context: str                       # Formatted context string for the LLM
+
+    # ── Generation ────────────────────────────────────────────────────────────
+    answer: str                        # Final answer string
+    faithfulness_score: float          # 0.0 – 1.0 grounding score
+
+    # ── Control Flow ──────────────────────────────────────────────────────────
+    retry_count: int                   # Self-correction loop counter
+    blocked: bool                      # True when input guard blocks the query
+
+    # ── Observability ─────────────────────────────────────────────────────────
+    retrieval_trace: List[str]         # Human-readable step-by-step trace
+    guardrail_flags: List[str]         # Triggered guardrail names
+    node_timings: dict                 # node_name -> elapsed_ms

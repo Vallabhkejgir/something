@@ -190,6 +190,16 @@
         word-wrap: break-word;
       }
 
+      .metadata {
+        color: #4b5563;
+        font-size: 13px;
+        line-height: 1.5;
+        margin-bottom: 16px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid #e5e7eb;
+        white-space: pre-wrap;
+      }
+
       .loading {
         display: flex;
         align-items: center;
@@ -304,6 +314,7 @@
           <span>Processing your query...</span>
         </div>
         <div class="response-box" id="responseBox" style="display: none">
+          <div class="metadata" id="metadata"></div>
           <div class="answer" id="answer"></div>
         </div>
         <div id="errorBox"></div>
@@ -323,6 +334,7 @@
       const responseBox = document.getElementById("responseBox");
       const errorBox = document.getElementById("errorBox");
       const answerDiv = document.getElementById("answer");
+      const metadataDiv = document.getElementById("metadata");
 
       // Initial check
       checkStatus();
@@ -404,6 +416,13 @@
           });
           const data = await res.json();
           if (res.ok) {
+            const trace = (data.retrieval_trace || []).join("\n");
+            metadataDiv.textContent = [
+              `Category: ${data.category || "unknown"}`,
+              `Retrieval method: ${data.retrieval_method || "unknown"}`,
+              `Adaptive path: ${(data.adaptive_strategies || []).join(" -> ") || "none"}`,
+              trace ? `Trace:\n${trace}` : "",
+            ].filter(Boolean).join("\n");
             answerDiv.textContent = data.answer;
             responseBox.style.display = "block";
           } else {

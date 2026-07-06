@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "RAG Web Companion",
+  "version": "1.0",
+  "description": "Index the current web page and ask questions about it using Multimodal RAG.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "sidePanel",
+    "storage"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Open Chat"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "host_permissions": [
+    "http://localhost:5000/*",
+    "<all_urls>"
+  ]
+}
