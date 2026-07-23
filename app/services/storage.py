@@ -1,5 +1,5 @@
 from qdrant_client import QdrantClient
-from langchain_community.vectorstores import Qdrant
+from langchain_qdrant import QdrantVectorStore
 from app.services.llm_config import embeddings
 from rank_bm25 import BM25Okapi
 import pickle
@@ -19,7 +19,7 @@ def store_chunks(splits):
     print("🚀 Indexing Qdrant and BM25...")
 
     # Dense Vector Store
-    vector_store = Qdrant.from_documents(
+    vector_store = QdrantVectorStore.from_documents(
         splits,
         embeddings,
         path="app/services/qdrant_data",  # Path to local SQLite/disk persist
@@ -46,10 +46,10 @@ def get_vector_store():
     if vector_store is None:
         try:
             # Attempt to load existing
-            vector_store = Qdrant(
+            vector_store = QdrantVectorStore(
                 client=qdrant_client,
                 collection_name=COLLECTION_NAME,
-                embeddings=embeddings,
+                embedding=embeddings,
             )
         except Exception:
             pass
