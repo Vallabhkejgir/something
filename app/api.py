@@ -1,57 +1,89 @@
-import asyncio
-from typing import List
-from flask import Flask, render_template, request, jsonify
-from flask_cors import CORS
+import os
+from typing import Optional
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
 from app.services.loader import Doc_loader
 from app.utils.chunks import chunk_texts
 from app.services.storage import store_chunks
 from app.RAG.graph import rag_app, GraphState
 
-app = Flask(__name__)
-CORS(app)
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+templates = Jinja2Templates(directory="app/templates")
 
 initialized = False
 
-@app.route('/')
-def index():
-    return render_template('index.html')
 
-@app.route('/api/initialize', methods=['POST'])
-def initialize():
+class InitRequest(BaseModel):
+    doc_url: Optional[str] = ""
+
+
+class QueryRequest(BaseModel):
+    prompt: str
+
+
+@app.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    return templates.TemplateResponse(request=request, name="index.html")
+
+
+@app.get("/api/status")
+async def status():
+    return {"initialized": initialized}
+
+
+@app.post("/api/initialize")
+async def initialize(req: InitRequest):
     global initialized
     try:
-        url = request.json.get('doc_url')
+        url = req.doc_url
         docs = Doc_loader(url)
         chunks = chunk_texts(docs)
         store_chunks(chunks)
         initialized = True
-        return jsonify({'status': 'success'})
+        return {"status": "success"}
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.route('/api/query', methods=['POST'])
-def query():
+
+@app.post("/api/query")
+async def query(req: QueryRequest):
     if not initialized:
-        return jsonify({'error': 'Load docs first'}), 400
-    
-    user_prompt = request.json.get('prompt')
-    inputs = GraphState(
-            question=user_prompt,
-            category="",
-            rewritten_queries=[],   
-            sub_queries=[],         
-            context="",             
-            answer=""               
-        )
-    
-    
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        final_state = loop.run_until_complete(rag_app.ainvoke(inputs))
-        return jsonify({'answer': final_state['answer']})
-    finally:
-        loop.close()
+        return JSONResponse(status_code=400, content={"error": "Load docs first"})
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    user_prompt = req.prompt
+    inputs = GraphState(
+        question=user_prompt,
+        category="",
+        rewritten_queries=[],
+        sub_queries=[],
+        context="",
+        answer="",
+        retry_count=0,
+        is_faithful=True,
+        relevance_scores=[],
+        retrieved_chunks=[],
+    )
+
+    try:
+        final_state = await rag_app.ainvoke(inputs)
+        return {"answer": final_state["answer"]}
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("app.api:app", host="0.0.0.0", port=5000)

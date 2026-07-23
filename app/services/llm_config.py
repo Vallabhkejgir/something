@@ -5,10 +5,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmb
 
 load_dotenv()
 
-# Models
+api_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or "dummy_key_for_init"
 model_name = os.getenv("LLM_MODEL", "gemini-1.5-flash")
-llm = ChatGoogleGenerativeAI(model=model_name)
-embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001")
+
+llm = ChatGoogleGenerativeAI(model=model_name, google_api_key=api_key)
+embeddings = GoogleGenerativeAIEmbeddings(model="gemini-embedding-001", google_api_key=api_key)
 
 # Global Rate Limiters
 GEN_LLM_LIMITER = TokenBucket(max_tokens_per_min=250_000, max_requests_per_min=5)

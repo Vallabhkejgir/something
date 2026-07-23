@@ -1,11 +1,5 @@
 from langchain_core.prompts import ChatPromptTemplate
 
-# prompt_template = """You are an assistant for question-answering tasks.
-# Use the following pieces of retrieved context to answer the question.
-# Context: {context}
-# Question: {question}
-# Answer:"""
-
 prompt_template = """
 You are a question-answering assistant.
 
@@ -23,16 +17,6 @@ Answer in a clear and concise manner.
 Do not add external knowledge.
 """
 
-
-# rewrite_template = """Generate 3 search queries for: {question}. Newline separated."""
-# rewrite_template = """
-# You are an AI assistant that helps users by generating multiple search queries based on their original question.
-# Your goal is to generate 3 diverse versions of the given question to retrieve relevant documents from a vector database.
-# Provide these queries as a newline-separated list.
-
-# Original question: {question}
-# """
-
 rewrite_template = """
 You generate search queries for a vector database.
 
@@ -46,17 +30,6 @@ Return ONLY a newline-separated list. No numbering. No explanations.
 Original question:
 {question}
 """
-
-
-# decompose_template = """Break down into 2-4 sub-questions if complex: {question}"""
-# decompose_template = """
-# You are an assistant that helps break down complex questions into smaller,
-# more manageable sub-questions.
-
-# If it is complex, return 2-4 sub-questions that together can answer the original.
-
-# Original Question: {question}
-# """
 
 decompose_template = """
 You are an assistant that helps break down complex questions into smaller, more manageable sub-questions.
@@ -74,19 +47,6 @@ Original question:
 {question}
 """
 
-
-
-# categorize_template = """You are an assistant that categorizes user questions for a RAG system.
-# Analyze the following question and classify it into one of three categories:
-
-# 1. "vague": The request is unclear, too short, or lacks context (e.g., "tell me more", "how does it work"). Needs rewriting.
-# 2. "complex": The question has multiple parts or requires a multi-step explanation. Needs decomposition.
-# 3. "concise": The question is specific, clear, and can be answered directly with a single search.
-
-# Question: {question}
-
-# Return only one word: "vague", "complex", or "concise"."""
-
 categorize_template = """
 Classify the user question for a RAG pipeline.
 
@@ -102,10 +62,36 @@ Respond with exactly one word:
 vague OR complex OR concise
 """
 
+relevance_template = """
+You are a grader assessing relevance of retrieved document chunks to a user question.
+
+User Question:
+{question}
+
+Retrieved Document Chunks:
+{chunks}
+
+For each chunk, determine if it is relevant to answering the user question.
+Return ONLY a JSON array of boolean values (true or false) corresponding to each chunk in order (e.g. [true, false, true]).
+Do NOT include markdown formatting, explanations, or any other text.
+"""
+
+faithfulness_template = """
+You are a grader assessing whether an answer is grounded in / faithful to a given context.
+
+Context:
+{context}
+
+Answer:
+{answer}
+
+Does the answer rely ONLY on the provided context without introducing fabricated facts or hallucinated information?
+Respond with exactly one word: "yes" if faithful, or "no" if unfaithful.
+"""
 
 categorize_prompt = ChatPromptTemplate.from_template(categorize_template)
-
-
 prompt = ChatPromptTemplate.from_template(prompt_template)
 rewrite_prompt = ChatPromptTemplate.from_template(rewrite_template)
 decompose_prompt = ChatPromptTemplate.from_template(decompose_template)
+relevance_prompt = ChatPromptTemplate.from_template(relevance_template)
+faithfulness_prompt = ChatPromptTemplate.from_template(faithfulness_template)
