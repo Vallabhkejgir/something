@@ -1,4 +1,4 @@
-from typing_extensions import List, TypedDict
+from typing import List, TypedDict
 
 class GraphState(TypedDict):
     question: str
@@ -7,4 +7,7 @@ class GraphState(TypedDict):
     sub_queries: List[str]
     context: str
     answer: str
-    
+    retry_count: int
+    is_faithful: bool
+    relevance_scores: List[bool]
+    retrieved_chunks: List[str]

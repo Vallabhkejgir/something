@@ -1,5 +1,6 @@
-flask
-flask-cors
+fastapi
+uvicorn
+jinja2
 python-dotenv
 langchain-google-genai
 langchain-community
