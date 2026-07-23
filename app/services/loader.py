@@ -31,7 +31,6 @@ def parse_with_unstructured(file_path: str, url: str = None) -> List[Document]:
         el_type = type(el).__name__
         if "Title" in el_type or "Heading" in el_type:
             current_section = str(el)
-            continue
 
         text = str(el).strip()
         if not text:
@@ -61,10 +60,14 @@ def Doc_loader(url: str = None) -> List[Document]:
         if url.startswith("http://") or url.startswith("https://"):
             if url.endswith((".pdf", ".docx", ".txt", ".md")):
                 # Download to temp file and parse with unstructured
-                with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(url)[1]) as tmp:
-                    urllib.request.urlretrieve(url, tmp.name)
-                    docs = parse_with_unstructured(tmp.name, url)
-                os.unlink(tmp.name)
+                fd, tmp_name = tempfile.mkstemp(suffix=os.path.splitext(url)[1])
+                os.close(fd)
+                try:
+                    urllib.request.urlretrieve(url, tmp_name)
+                    docs = parse_with_unstructured(tmp_name, url)
+                finally:
+                    if os.path.exists(tmp_name):
+                        os.unlink(tmp_name)
                 print(f"✅ Loaded {len(docs)} document elements via unstructured.")
                 return docs
             else:

@@ -92,7 +92,21 @@ async def retrieve_context(state):
         # Take top 5 from fused results
         all_docs.extend(fused_docs[:5])
 
-    unique_contents = list(dict.fromkeys([d.page_content for d in all_docs]))
+    unique_docs = {}
+    for d in all_docs:
+        chunk_id = d.metadata.get("chunk_id", d.page_content)
+        if chunk_id not in unique_docs:
+            unique_docs[chunk_id] = d
+
+    unique_contents = []
+    for d in unique_docs.values():
+        meta = d.metadata
+        url = meta.get("source_url", "N/A")
+        title = meta.get("document_title", "N/A")
+        heading = meta.get("section_heading", "N/A")
+        content = f"Source: {url}\nTitle: {title}\nHeading: {heading}\nContent: {d.page_content}"
+        unique_contents.append(content)
+
     context = "\n\n".join(unique_contents)
     return {"context": context, "retrieved_chunks": unique_contents}
 

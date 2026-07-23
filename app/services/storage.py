@@ -22,7 +22,7 @@ def store_chunks(splits):
     vector_store = Qdrant.from_documents(
         splits,
         embeddings,
-        location="app/services/qdrant_data",  # Path to local SQLite/disk persist
+        path="app/services/qdrant_data",  # Path to local SQLite/disk persist
         collection_name=COLLECTION_NAME,
         force_recreate=True, # For simplicity of overwriting in this iteration
     )
@@ -33,6 +33,7 @@ def store_chunks(splits):
     sparse_docs = splits
 
     # Save BM25 index and docs to disk
+    os.makedirs("app/services/qdrant_data", exist_ok=True)
     with open("app/services/qdrant_data/bm25_index.pkl", "wb") as f:
         pickle.dump(sparse_index, f)
     with open("app/services/qdrant_data/bm25_docs.pkl", "wb") as f:
@@ -73,17 +74,17 @@ def reciprocal_rank_fusion(dense_results, sparse_results, k=60):
 
     # Score dense results
     for rank, doc in enumerate(dense_results):
-        doc_content = doc.page_content
-        if doc_content not in rrf_scores:
-            rrf_scores[doc_content] = {"score": 0.0, "doc": doc}
-        rrf_scores[doc_content]["score"] += 1.0 / (rank + 1 + k)
+        doc_key = doc.metadata.get("chunk_id", doc.page_content)
+        if doc_key not in rrf_scores:
+            rrf_scores[doc_key] = {"score": 0.0, "doc": doc}
+        rrf_scores[doc_key]["score"] += 1.0 / (rank + 1 + k)
 
     # Score sparse results
     for rank, doc in enumerate(sparse_results):
-        doc_content = doc.page_content
-        if doc_content not in rrf_scores:
-            rrf_scores[doc_content] = {"score": 0.0, "doc": doc}
-        rrf_scores[doc_content]["score"] += 1.0 / (rank + 1 + k)
+        doc_key = doc.metadata.get("chunk_id", doc.page_content)
+        if doc_key not in rrf_scores:
+            rrf_scores[doc_key] = {"score": 0.0, "doc": doc}
+        rrf_scores[doc_key]["score"] += 1.0 / (rank + 1 + k)
 
     # Sort by RRF score descending
     sorted_results = sorted(list(rrf_scores.values()), key=lambda x: x["score"], reverse=True)
