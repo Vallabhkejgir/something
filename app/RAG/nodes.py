@@ -1,4 +1,5 @@
 import json
+import asyncio
 from typing import List
 from langchain_core.output_parsers import StrOutputParser
 from app.services.llm_config import llm, GEN_LLM_LIMITER
@@ -70,8 +71,8 @@ async def retrieve_context(state):
         queries = [state["question"]]
 
     all_docs = []
-    for q in queries:
-        docs = await retriever.ainvoke(q)
+    results = await asyncio.gather(*[retriever.ainvoke(q) for q in queries])
+    for docs in results:
         all_docs.extend(docs)
 
     unique_contents = list(dict.fromkeys([d.page_content for d in all_docs]))
@@ -99,7 +100,7 @@ async def relevance_grader(state):
 
     relevant_chunks = [chunk for chunk, is_rel in zip(chunks, scores) if is_rel]
     if not relevant_chunks:
-        filtered_context = state.get("context", "")
+        filtered_context = ""
     else:
         filtered_context = "\n\n".join(relevant_chunks)
 

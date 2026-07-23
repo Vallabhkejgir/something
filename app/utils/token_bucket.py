@@ -17,6 +17,8 @@ class TokenBucket:
         return self._lock
 
     async def acquire(self, tokens_needed=1):
+        if tokens_needed > self.max_tokens:
+            raise ValueError(f"tokens_needed ({tokens_needed}) exceeds max_tokens ({self.max_tokens})")
         while True:
             wait_time = 0.0
             async with self.lock:
