@@ -9,4 +9,4 @@ ENV PYTHONUNBUFFERED=1
 # Use async-capable gunicorn worker
 RUN pip install --no-cache-dir gunicorn[gevent]
 EXPOSE 5000
-CMD ["gunicorn", "-w", "1", "-k", "geventlet", "--timeout", "120", "-b", "0.0.0.0:5000", "app.api:app"]
+CMD ["gunicorn", "-w", "1", "-k", "gevent", "--timeout", "120", "-b", "0.0.0.0:5000", "app.api:app"]

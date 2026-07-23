@@ -26,6 +26,7 @@ from langchain_core.output_parsers import StrOutputParser
 
 from app.guardrails.input_guard import check_input
 from app.guardrails.output_guard import check_output
+from app.RAG.query_rewriting import rewrite_basic, rewrite_step_back, rewrite_sub_queries
 from app.RAG.prompts import (
     generation_prompt,
     relevance_grading_prompt,
@@ -251,29 +252,35 @@ async def relevance_grader(state: dict) -> dict:
 async def query_transformer(state: dict) -> dict:
     """
     Query transformation node (retry path).
-    Rewrites the query when retrieval quality was insufficient.
-    Increments retry_count.
+    Rewrites the query when retrieval quality was insufficient using dynamic strategies.
     """
     t0 = time.perf_counter()
     question    = state.get("question", "")
+    original    = state.get("original_question") or question
     retry_count = state.get("retry_count", 0)
     trace       = list(state.get("retrieval_trace", []))
 
-    try:
-        await FAST_LLM_LIMITER.acquire(150)
-        chain = query_transform_prompt | fast_llm | StrOutputParser()
-        new_question = await chain.ainvoke({"question": question})
-        new_question = new_question.strip().strip('"').strip("'")
-        trace.append(f"QUERY_TRANSFORM: '{question}' → '{new_question}'")
-        logger.info("Query transformed: %s → %s", question, new_question)
-    except Exception as e:
-        logger.warning("Query transform failed (%s) — keeping original.", e)
-        new_question = question
+    # Determine strategy based on retry count
+    if retry_count == 0:
+        strategy_name = "step-back"
+        new_queries = await rewrite_step_back(original)
+        next_retrieval_strategy = "hybrid"
+    elif retry_count == 1:
+        strategy_name = "sub-queries"
+        new_queries = await rewrite_sub_queries(original)
+        next_retrieval_strategy = "multi_query"
+    else:
+        strategy_name = "basic"
+        new_queries = await rewrite_basic(original)
+        next_retrieval_strategy = "hybrid"
+
+    trace.append(f"QUERY_TRANSFORM ({strategy_name}): '{original}' → {new_queries}")
+    logger.info("Query transformed (%s): %s → %s", strategy_name, original, new_queries)
 
     return {
-        "question": new_question,
-        "search_queries": [new_question],
-        "retrieval_strategy": "hybrid",  # Reset to reliable default on retry
+        "original_question": original,  # Preserve the original
+        "search_queries": new_queries,
+        "retrieval_strategy": next_retrieval_strategy,
         "retry_count": retry_count + 1,
         "retrieval_trace": trace,
         "node_timings": _timed(state, "query_transformer", t0),

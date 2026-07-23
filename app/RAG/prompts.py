@@ -103,3 +103,31 @@ query_transform_prompt = ChatPromptTemplate.from_template(QUERY_TRANSFORM_PROMPT
 
 # ── Legacy alias (used by old tests/imports) ──────────────────────────────────
 prompt = generation_prompt
+
+# ── Step-Back Transform ───────────────────────────────────────────────────────
+# Used by: rewrite_step_back (fast_llm, temperature=0.5)
+STEP_BACK_PROMPT_STR = """
+You are an expert at information retrieval. A highly specific search query failed to find relevant results.
+Your task is to step back and write a broader, more generic, high-level version of the question. 
+This broader question should retrieve the general context needed to answer the specific question.
+
+ORIGINAL QUERY: {question}
+
+Write ONLY the broader search query. No explanation, no quotes.
+""".strip()
+
+step_back_prompt = ChatPromptTemplate.from_template(STEP_BACK_PROMPT_STR)
+
+# ── Sub-Query Decomposition ───────────────────────────────────────────────────
+# Used by: rewrite_sub_queries (fast_llm, temperature=0.5)
+SUB_QUERY_PROMPT_STR = """
+You are an expert at information retrieval. A complex search query failed to find relevant results because it asks for too much at once or combines multiple concepts.
+Your task is to decompose the complex query into 2 to 3 simpler, atomic, self-contained sub-queries.
+
+ORIGINAL QUERY: {question}
+
+Respond with ONLY a valid JSON array of strings representing the sub-queries. No explanations, no markdown blocks if possible.
+Example: ["sub query 1", "sub query 2"]
+""".strip()
+
+sub_query_prompt = ChatPromptTemplate.from_template(SUB_QUERY_PROMPT_STR)

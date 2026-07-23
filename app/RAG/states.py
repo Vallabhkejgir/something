@@ -12,6 +12,7 @@ from typing_extensions import TypedDict
 class GraphState(TypedDict, total=False):
     # ── Input ─────────────────────────────────────────────────────────────────
     question: str                      # Original user question
+    original_question: str             # Unaltered original question
 
     # ── Query Analysis ────────────────────────────────────────────────────────
     query_analysis: dict               # QueryAnalysis model serialised as dict

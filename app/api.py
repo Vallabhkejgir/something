@@ -38,21 +38,6 @@ _ENABLE_CACHE = os.getenv("ENABLE_SEMANTIC_CACHE", "true").lower() == "true"
 
 # ── Helper: run async in current or new event loop ────────────────────────────
 
-def _run_async(coro):
-    """Run an async coroutine from a sync context safely."""
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result()
-        else:
-            return loop.run_until_complete(coro)
-    except RuntimeError:
-        return asyncio.run(coro)
-
-
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -73,7 +58,7 @@ def status():
 
 
 @app.route("/api/initialize", methods=["POST"])
-def initialize():
+async def initialize():
     """
     Index a web page.
     Accepts: { url, title, elements: [{type, content, ...}] }
@@ -93,11 +78,11 @@ def initialize():
             return jsonify({"status": "already_indexed", "url": url})
 
         # Process elements into chunks (async)
-        chunks = _run_async(process_elements(url, title, elements))
+        chunks = await process_elements(url, title, elements)
         logger.info("Chunks produced: %d", len(chunks) if chunks else 0)
 
         # Store in vector stores (async)
-        _run_async(store_manager.add_documents(chunks, url=url))
+        await store_manager.add_documents(chunks, url=url)
 
         # Invalidate cache since index changed
         query_cache.invalidate()
@@ -118,7 +103,7 @@ def initialize():
 
 
 @app.route("/api/query", methods=["POST"])
-def query():
+async def query():
     """
     Run the RAG pipeline for a user query.
     Accepts: { prompt: str }
@@ -138,9 +123,7 @@ def query():
 
     # ── Semantic cache lookup ─────────────────────────────────────────────────
     if _ENABLE_CACHE:
-        cached = _run_async(
-            query_cache.get(user_prompt, store_manager.index_version)
-        )
+        cached = await query_cache.get(user_prompt, store_manager.index_version)
         if cached:
             cached["cached"] = True
             cached["latency_ms"] = int((time.perf_counter() - t0) * 1000)
@@ -159,7 +142,7 @@ def query():
     )
 
     try:
-        final_state = _run_async(rag_app.ainvoke(initial_state))
+        final_state = await rag_app.ainvoke(initial_state)
     except Exception as e:
         import traceback
         logger.error("RAG pipeline error: %s\n%s", e, traceback.format_exc())
@@ -184,7 +167,7 @@ def query():
 
     # ── Cache the result ──────────────────────────────────────────────────────
     if _ENABLE_CACHE and not final_state.get("blocked"):
-        _run_async(query_cache.set(user_prompt, result, store_manager.index_version))
+        await query_cache.set(user_prompt, result, store_manager.index_version)
 
     metrics_tracker.record_query(result, cached=False)
     logger.info(

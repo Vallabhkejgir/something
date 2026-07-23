@@ -278,7 +278,16 @@ async def _describe_and_classify_image(
             ]
         )
         resp = await fast_llm.ainvoke([message])
-        raw = resp.content.strip()
+        raw = resp.content
+        if isinstance(raw, list):
+            parts = []
+            for item in raw:
+                if isinstance(item, str):
+                    parts.append(item)
+                elif isinstance(item, dict) and "text" in item:
+                    parts.append(item["text"])
+            raw = " ".join(parts)
+        raw = raw.strip()
 
         img_type = "other"
         description = raw
