@@ -36,7 +36,7 @@ async def test_faithfulness_checker_increments_retry_count():
 
     with patch("app.RAG.nodes.faithfulness_prompt") as mock_prompt, patch(
         "app.RAG.nodes.llm"
-    ) as mock_llm:
+    ):
         chain_mock = AsyncMock()
         chain_mock.ainvoke.return_value = "no"
         mock_prompt.__or__.return_value.__or__.return_value = chain_mock
@@ -60,7 +60,7 @@ async def test_relevance_grader_batched():
 
     with patch("app.RAG.nodes.relevance_prompt") as mock_prompt, patch(
         "app.RAG.nodes.llm"
-    ) as mock_llm:
+    ):
         chain_mock = AsyncMock()
         chain_mock.ainvoke.return_value = "[true, false]"
         mock_prompt.__or__.return_value.__or__.return_value = chain_mock
