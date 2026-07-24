@@ -11,7 +11,7 @@ from typing import List
 
 from langchain_core.documents import Document
 
-from app.services.llm_config import fast_llm, FAST_LLM_LIMITER
+from app.services.llm_config import llm as fast_llm, GEN_LLM_LIMITER as FAST_LLM_LIMITER
 from app.utils.chunking_strategies import chunk_text, chunk_table, chunk_image
 
 logger = logging.getLogger(__name__)

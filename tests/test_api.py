@@ -20,7 +20,7 @@ def test_query_uninitialized():
     assert response.json()["error"] == "Load docs first"
 
 @patch("app.api.Doc_loader")
-@patch("app.api.chunk_texts")
+@patch("app.api.process_elements")
 @patch("app.api.store_chunks")
 def test_initialize_and_query(mock_store, mock_chunk, mock_loader):
     mock_loader.return_value = ["doc"]
