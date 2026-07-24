@@ -1,32 +1,26 @@
-"""
-storage.py — Thread-safe VectorStoreManager.
-
-Manages:
-  - FAISS dense vector index (children + standalone chunks)
-  - BM25 sparse index (rebuilt incrementally from accumulated docs)
-  - Parent document store (in-memory dict keyed by chunk_id)
-
-Usage:
-    from app.services.storage import store_manager
-    await store_manager.add_documents(chunks, url="https://...")
-"""
-
 import asyncio
 import logging
 from typing import List, Optional
+import os
+import pickle
 
 from langchain_community.retrievers import BM25Retriever
-from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
+from qdrant_client import QdrantClient
+from langchain_qdrant import QdrantVectorStore
 
 from app.services.llm_config import embeddings
 
 logger = logging.getLogger(__name__)
 
+# Persistent Qdrant local client
+qdrant_client = QdrantClient(path="app/services/qdrant_data")
+COLLECTION_NAME = "employee_knowledge_base"
+
 
 class VectorStoreManager:
     """
-    Manages FAISS, BM25, and parent document stores.
+    Manages Qdrant, BM25, and parent document stores.
 
     The `_lock` ensures that concurrent indexing requests (multiple tabs)
     do not corrupt internal state. Single-writer, multi-reader pattern.
@@ -36,7 +30,7 @@ class VectorStoreManager:
         self._lock = asyncio.Lock()
 
         # Vector stores
-        self.vector_store: Optional[FAISS] = None
+        self.vector_store: Optional[QdrantVectorStore] = None
         self.bm25_retriever: Optional[BM25Retriever] = None
 
         # Parent doc store: chunk_id -> Document (full parent text)
@@ -56,7 +50,7 @@ class VectorStoreManager:
         Ingest a batch of documents (parents + children).
 
         Parents (is_parent=True) are routed to the parent_store only.
-        Children / standalone docs are indexed in FAISS and BM25.
+        Children / standalone docs are indexed in Qdrant and BM25.
         """
         if not docs:
             logger.warning("add_documents called with empty list — skipping.")
@@ -83,11 +77,16 @@ class VectorStoreManager:
             # Accumulate all index docs (needed for BM25 full rebuild)
             self._all_index_docs.extend(index_docs)
 
-            # Update FAISS
-            logger.info("Indexing %d docs into FAISS...", len(index_docs))
+            # Update Qdrant
+            logger.info("Indexing %d docs into Qdrant...", len(index_docs))
             if self.vector_store is None:
                 self.vector_store = await asyncio.to_thread(
-                    FAISS.from_documents, index_docs, embeddings
+                    QdrantVectorStore.from_documents,
+                    index_docs,
+                    embeddings,
+                    path="app/services/qdrant_data",
+                    collection_name=COLLECTION_NAME,
+                    force_recreate=True,
                 )
             else:
                 await asyncio.to_thread(self.vector_store.add_documents, index_docs)
@@ -140,6 +139,39 @@ class VectorStoreManager:
             "total_parents": len(self.parent_store),
             "index_version": self._index_version,
         }
+
+    def get_vector_store(self):
+        if self.vector_store is None:
+            try:
+                self.vector_store = QdrantVectorStore(
+                    client=qdrant_client,
+                    collection_name=COLLECTION_NAME,
+                    embedding=embeddings,
+                )
+            except Exception:
+                pass
+        return self.vector_store
+
+    def reciprocal_rank_fusion(self, dense_results, sparse_results, k=60):
+        """
+        Combines dense and sparse search results using Reciprocal Rank Fusion.
+        """
+        rrf_scores = {}
+
+        for rank, doc in enumerate(dense_results):
+            doc_key = doc.metadata.get("chunk_id", doc.page_content)
+            if doc_key not in rrf_scores:
+                rrf_scores[doc_key] = {"score": 0.0, "doc": doc}
+            rrf_scores[doc_key]["score"] += 1.0 / (rank + 1 + k)
+
+        for rank, doc in enumerate(sparse_results):
+            doc_key = doc.metadata.get("chunk_id", doc.page_content)
+            if doc_key not in rrf_scores:
+                rrf_scores[doc_key] = {"score": 0.0, "doc": doc}
+            rrf_scores[doc_key]["score"] += 1.0 / (rank + 1 + k)
+
+        sorted_results = sorted(list(rrf_scores.values()), key=lambda x: x["score"], reverse=True)
+        return [item["doc"] for item in sorted_results]
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────

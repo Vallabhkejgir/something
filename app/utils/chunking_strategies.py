@@ -64,9 +64,9 @@ def chunk_text(
         return []
 
     # Prepend heading context so every chunk carries its section identity
-    context_prefix = f"[Source: {page_title}]"
+    context_prefix = f"[Source: {page_title} | URL: {source_url}]"
     if section_heading:
-        context_prefix += f" [{section_heading}]"
+        context_prefix += f" [Heading: {section_heading}]"
 
     parent_texts = _parent_splitter.split_text(text)
     all_docs: list[Document] = []
@@ -142,7 +142,7 @@ async def chunk_table(
     parent_id = str(uuid.uuid4())
 
     # Parent: full table (stored, not indexed for vector search directly)
-    parent_content = f"[Table {table_index} from '{page_title}']\n\n{table_markdown}"
+    parent_content = f"[Source: {page_title} | URL: {source_url}]\n[Table {table_index}]\n\n{table_markdown}"
     parent_doc = Document(page_content=parent_content)
     enrich(
         parent_doc,
@@ -161,7 +161,7 @@ async def chunk_table(
 
     # Child: LLM summary (indexed in vector store for semantic retrieval)
     retrieval_content = (
-        f"[Table {table_index} Summary from '{page_title}']\n\n"
+        f"[Source: {page_title} | URL: {source_url}]\n[Table {table_index} Summary]\n\n"
         f"{summary}\n\n"
         f"Columns: {', '.join(columns) if columns else 'N/A'} | Rows: {row_count}"
     )
@@ -224,7 +224,8 @@ async def chunk_image(
     )
 
     content = (
-        f"[Image from '{page_title}']\n"
+        f"[Source: {page_title} | URL: {source_url}]\n"
+        f"[Image]\n"
         f"Type: {img_type}\n"
         f"Alt text: {alt_text or 'None'}\n"
         f"Description: {description}"

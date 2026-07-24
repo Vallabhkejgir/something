@@ -61,21 +61,52 @@ async def decompose_query(state):
 
 async def retrieve_context(state):
     print("---NODE: RETRIEVE---")
-    if storage.vector_store is None:
+    store = storage.get_vector_store()
+    if store is None:
         raise ValueError("Vector Store not initialized")
 
-    retriever = storage.vector_store.as_retriever(search_kwargs={"k": 5})
+    sparse_index, sparse_docs = storage.get_bm25_index()
+
+    retriever = store.as_retriever(search_kwargs={"k": 5})
 
     queries = state.get("rewritten_queries", []) + state.get("sub_queries", [])
     if not queries:
         queries = [state["question"]]
 
     all_docs = []
-    results = await asyncio.gather(*[retriever.ainvoke(q) for q in queries])
-    for docs in results:
-        all_docs.extend(docs)
 
-    unique_contents = list(dict.fromkeys([d.page_content for d in all_docs]))
+    for q in queries:
+        # Dense Retrieval
+        dense_docs = await retriever.ainvoke(q)
+
+        # Sparse Retrieval (BM25)
+        sparse_results = []
+        if sparse_index and sparse_docs:
+            tokenized_query = q.lower().split(" ")
+            # Get top 5 BM25 docs
+            top_n = sparse_index.get_top_n(tokenized_query, sparse_docs, n=5)
+            sparse_results = top_n
+
+        # RRF Fusion
+        fused_docs = storage.reciprocal_rank_fusion(dense_docs, sparse_results)
+        # Take top 5 from fused results
+        all_docs.extend(fused_docs[:5])
+
+    unique_docs = {}
+    for d in all_docs:
+        chunk_id = d.metadata.get("chunk_id", d.page_content)
+        if chunk_id not in unique_docs:
+            unique_docs[chunk_id] = d
+
+    unique_contents = []
+    for d in unique_docs.values():
+        meta = d.metadata
+        url = meta.get("source_url", "N/A")
+        title = meta.get("document_title", "N/A")
+        heading = meta.get("section_heading", "N/A")
+        content = f"Source: {url}\nTitle: {title}\nHeading: {heading}\nContent: {d.page_content}"
+        unique_contents.append(content)
+
     context = "\n\n".join(unique_contents)
     return {"context": context, "retrieved_chunks": unique_contents}
 

@@ -6,6 +6,9 @@ langchain-google-genai
 langchain-community
 langchain-core
 langgraph
-faiss-cpu
 beautifulsoup4
 langchain-chroma
+qdrant-client
+rank_bm25
+unstructured
+pdfplumber

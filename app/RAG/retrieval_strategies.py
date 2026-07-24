@@ -3,7 +3,7 @@ retrieval_strategies.py — Multi-strategy retrieval engine.
 
 Implements all retrieval strategies selected by the query analyser:
 
-  dense          — FAISS semantic search
+  dense          — Qdrant semantic search
   sparse         — BM25 keyword search
   hybrid         — dense + sparse merged via Reciprocal Rank Fusion (default)
   multi_query    — run multiple query variants in parallel, merge with RRF
@@ -52,7 +52,7 @@ def reciprocal_rank_fusion(
 # ── Individual Retrieval Strategies ──────────────────────────────────────────
 
 async def retrieve_dense(query: str, store_manager, top_k: int = 10) -> List[Document]:
-    """Semantic dense retrieval via FAISS."""
+    """Semantic dense retrieval via Qdrant."""
     if store_manager.vector_store is None:
         return []
     retriever = store_manager.vector_store.as_retriever(
@@ -124,7 +124,7 @@ async def retrieve_hyde(
     Hypothetical Document Embedding (HyDE):
     1. LLM generates a hypothetical answer to the query.
     2. Embed the hypothetical answer.
-    3. Use the embedding to search FAISS (semantic proximity to real docs).
+    3. Use the embedding to search Qdrant (semantic proximity to real docs).
     """
     if store_manager.vector_store is None:
         return []
@@ -207,11 +207,11 @@ async def retrieve_metadata_filtered(
         logger.debug("MetadataFilter: no docs of types %s — falling back to hybrid.", element_types)
         return await retrieve_hybrid([query], store_manager, top_k)
 
-    # Build a temporary FAISS index over the filtered subset
-    from langchain_community.vectorstores import FAISS as _FAISS
+    # Build a temporary Qdrant index over the filtered subset
+    from langchain_qdrant import QdrantVectorStore as _QdrantVectorStore
     from app.services.llm_config import embeddings as _embeddings
     try:
-        temp_store = await asyncio.to_thread(_FAISS.from_documents, filtered_docs, _embeddings)
+        temp_store = await asyncio.to_thread(_Qdrant.from_documents, filtered_docs, _embeddings)
         retriever = temp_store.as_retriever(search_kwargs={"k": min(top_k, len(filtered_docs))})
         results = await retriever.ainvoke(query)
         logger.debug(
