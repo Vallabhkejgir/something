@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.services.loader import Doc_loader
-from app.utils.chunks import chunk_texts
+from app.utils.chunks import process_elements
 from app.services.storage import store_chunks
 from app.RAG.graph import rag_app, GraphState
 
@@ -49,7 +49,7 @@ async def initialize(req: InitRequest):
     try:
         url = req.doc_url
         docs = Doc_loader(url)
-        chunks = chunk_texts(docs)
+        chunks = await process_elements(url, "Document Title", docs)
         store_chunks(chunks)
         initialized = True
         return {"status": "success"}
