@@ -42,17 +42,22 @@ async def process_elements(url: str, title: str, elements: list) -> List[Documen
     )
 
     # ── Text: synchronous, fast ───────────────────────────────────────────────
-    combined_text = "\n\n".join(
-        el.get("content", "") for el in text_elements if el.get("content", "").strip()
-    )
-    if combined_text:
-        text_docs = chunk_text(
-            text=combined_text,
-            source_url=url,
-            page_title=title,
-        )
-        all_docs.extend(text_docs)
-        logger.debug("Text chunks produced: %d", len(text_docs))
+    text_chunks_count = 0
+    for el in text_elements:
+        content = el.get("content", "").strip()
+        heading = el.get("heading", "").strip()
+        if content:
+            text_docs = chunk_text(
+                text=content,
+                source_url=url,
+                page_title=title,
+                section_heading=heading,
+            )
+            all_docs.extend(text_docs)
+            text_chunks_count += len(text_docs)
+
+    if text_chunks_count > 0:
+        logger.debug("Text chunks produced: %d", text_chunks_count)
 
     # ── Tables & Images: concurrent async tasks ───────────────────────────────
     async_tasks = []

@@ -27,17 +27,34 @@ if (!window.contentScriptLoaded) {
     
     // Extract text in chunks (e.g. by paragraphs or headings)
     const textNodes = bodyClone.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li');
+    let currentHeading = "";
     let currentText = [];
+
     textNodes.forEach(node => {
+      const tag = node.tagName.toLowerCase();
       const text = node.textContent.trim();
-      if (text.length > 20) {
-        currentText.push(text);
+
+      if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
+        if (currentText.length > 0) {
+          elements.push({
+            type: 'text',
+            heading: currentHeading,
+            content: currentText.join('\n\n')
+          });
+          currentText = [];
+        }
+        currentHeading = text;
+      } else {
+        if (text.length > 20) {
+          currentText.push(text);
+        }
       }
     });
-    
+
     if (currentText.length > 0) {
       elements.push({
         type: 'text',
+        heading: currentHeading,
         content: currentText.join('\n\n')
       });
     }
