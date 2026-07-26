@@ -61,11 +61,11 @@ async def decompose_query(state):
 
 async def retrieve_context(state):
     print("---NODE: RETRIEVE---")
-    store = storage.get_vector_store()
+    store = storage.store_manager.get_vector_store()
     if store is None:
         raise ValueError("Vector Store not initialized")
 
-    sparse_index, sparse_docs = storage.get_bm25_index()
+    bm25_retriever = storage.store_manager.bm25_retriever
 
     retriever = store.as_retriever(search_kwargs={"k": 5})
 
@@ -81,14 +81,11 @@ async def retrieve_context(state):
 
         # Sparse Retrieval (BM25)
         sparse_results = []
-        if sparse_index and sparse_docs:
-            tokenized_query = q.lower().split(" ")
-            # Get top 5 BM25 docs
-            top_n = sparse_index.get_top_n(tokenized_query, sparse_docs, n=5)
-            sparse_results = top_n
+        if bm25_retriever:
+            sparse_results = await bm25_retriever.ainvoke(q)
 
         # RRF Fusion
-        fused_docs = storage.reciprocal_rank_fusion(dense_docs, sparse_results)
+        fused_docs = storage.store_manager.reciprocal_rank_fusion(dense_docs, sparse_results)
         # Take top 5 from fused results
         all_docs.extend(fused_docs[:5])
 
