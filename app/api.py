@@ -49,7 +49,18 @@ async def initialize(req: InitRequest):
     try:
         url = req.doc_url
         docs = Doc_loader(url)
-        chunks = await process_elements(url, "Document Title", docs)
+
+        # Convert Document objects to the format expected by process_elements
+        elements = [
+            {
+                "type": "text",
+                "content": doc.page_content,
+                "heading": doc.metadata.get("section_heading", "")
+            }
+            for doc in docs
+        ]
+
+        chunks = await process_elements(url, "Document Title", elements)
         store_chunks(chunks)
         initialized = True
         return {"status": "success"}
