@@ -13,14 +13,14 @@ from app.services.llm_config import embeddings
 
 logger = logging.getLogger(__name__)
 
-# Persistent Qdrant local client
-qdrant_client = None
+# Qdrant client singleton getter
+_qdrant_client = None
 
 def get_qdrant_client():
-    global qdrant_client
-    if qdrant_client is None:
-        qdrant_client = QdrantClient(path="app/services/qdrant_data")
-    return qdrant_client
+    global _qdrant_client
+    if _qdrant_client is None:
+        _qdrant_client = QdrantClient(path="app/services/qdrant_data")
+    return _qdrant_client
 COLLECTION_NAME = "employee_knowledge_base"
 
 
@@ -87,19 +87,29 @@ class VectorStoreManager:
             logger.info("Indexing %d docs into Qdrant...", len(index_docs))
             if self.vector_store is None:
                 client = get_qdrant_client()
-                if not client.collection_exists(COLLECTION_NAME):
-                    from qdrant_client.models import Distance, VectorParams
-                    # Assuming gemini-embedding-001 has size 768
-                    client.create_collection(
-                        collection_name=COLLECTION_NAME,
-                        vectors_config=VectorParams(size=768, distance=Distance.COSINE),
-                    )
+                from qdrant_client.models import Distance, VectorParams
+                
+                try:
+                    if not client.collection_exists(COLLECTION_NAME):
+                        client.create_collection(
+                            collection_name=COLLECTION_NAME,
+                            vectors_config=VectorParams(size=3072, distance=Distance.COSINE),
+                        )
+                    else:
+                        info = client.get_collection(COLLECTION_NAME)
+                        if getattr(info.config.params.vectors, "size", 768) != 3072:
+                            logger.info("Recreating Qdrant collection to match 3072 dimension")
+                            client.recreate_collection(
+                                collection_name=COLLECTION_NAME,
+                                vectors_config=VectorParams(size=3072, distance=Distance.COSINE),
+                            )
+                except Exception as e:
+                    logger.warning(f"Error checking/creating collection: {e}")
 
-                self.vector_store = QdrantVectorStore.construct_instance(
-                    client_options={"path": "app/services/qdrant_data"},
+                self.vector_store = QdrantVectorStore(
+                    client=client,
                     collection_name=COLLECTION_NAME,
                     embedding=embeddings,
-                    force_recreate=True,
                 )
 
             await asyncio.to_thread(self.vector_store.add_documents, index_docs)
@@ -156,14 +166,13 @@ class VectorStoreManager:
     def get_vector_store(self):
         if self.vector_store is None:
             try:
-                self.vector_store = QdrantVectorStore.construct_instance(
-                    client_options={"path": "app/services/qdrant_data"},
+                self.vector_store = QdrantVectorStore(
+                    client=get_qdrant_client(),
                     collection_name=COLLECTION_NAME,
                     embedding=embeddings,
-                    force_recreate=True,
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                logger.error("Failed to initialize QdrantVectorStore in get_vector_store: %s", e)
         return self.vector_store
 
     def reciprocal_rank_fusion(self, dense_results, sparse_results, k=60):
