@@ -86,16 +86,13 @@ class VectorStoreManager:
             # Update Qdrant
             logger.info("Indexing %d docs into Qdrant...", len(index_docs))
             if self.vector_store is None:
-                self.vector_store = await asyncio.to_thread(
-                    QdrantVectorStore.from_documents,
-                    index_docs,
-                    embeddings,
+                self.vector_store = QdrantVectorStore(
                     client=get_qdrant_client(),
                     collection_name=COLLECTION_NAME,
-                    force_recreate=True,
+                    embedding=embeddings,
                 )
-            else:
-                await asyncio.to_thread(self.vector_store.add_documents, index_docs)
+
+            await asyncio.to_thread(self.vector_store.add_documents, index_docs)
 
             # Rebuild BM25 from ALL accumulated docs
             logger.info("Rebuilding BM25 over %d total docs...", len(self._all_index_docs))
