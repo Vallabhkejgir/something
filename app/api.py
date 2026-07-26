@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from app.services.loader import Doc_loader
 from app.utils.chunks import process_elements
-from app.services.storage import store_chunks
+from app.services.storage import store_manager
 from app.RAG.graph import rag_app, GraphState
 
 app = FastAPI()
@@ -61,7 +61,7 @@ async def initialize(req: InitRequest):
         ]
 
         chunks = await process_elements(url, "Document Title", elements)
-        store_chunks(chunks)
+        await store_manager.add_documents(chunks, url)
         initialized = True
         return {"status": "success"}
     except Exception as e:
