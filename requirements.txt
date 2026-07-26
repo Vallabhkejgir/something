@@ -12,3 +12,6 @@ qdrant-client
 rank_bm25
 unstructured
 pdfplumber
+pydantic
+langchain-qdrant
+langchain-text-splitters
