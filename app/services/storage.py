@@ -14,7 +14,13 @@ from app.services.llm_config import embeddings
 logger = logging.getLogger(__name__)
 
 # Persistent Qdrant local client
-qdrant_client = QdrantClient(path="app/services/qdrant_data")
+qdrant_client = None
+
+def get_qdrant_client():
+    global qdrant_client
+    if qdrant_client is None:
+        qdrant_client = QdrantClient(path="app/services/qdrant_data")
+    return qdrant_client
 COLLECTION_NAME = "employee_knowledge_base"
 
 
@@ -84,7 +90,7 @@ class VectorStoreManager:
                     QdrantVectorStore.from_documents,
                     index_docs,
                     embeddings,
-                    path="app/services/qdrant_data",
+                    client=get_qdrant_client(),
                     collection_name=COLLECTION_NAME,
                     force_recreate=True,
                 )
@@ -144,7 +150,7 @@ class VectorStoreManager:
         if self.vector_store is None:
             try:
                 self.vector_store = QdrantVectorStore(
-                    client=qdrant_client,
+                    client=get_qdrant_client(),
                     collection_name=COLLECTION_NAME,
                     embedding=embeddings,
                 )
