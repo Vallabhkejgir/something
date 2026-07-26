@@ -86,8 +86,17 @@ class VectorStoreManager:
             # Update Qdrant
             logger.info("Indexing %d docs into Qdrant...", len(index_docs))
             if self.vector_store is None:
+                client = get_qdrant_client()
+                if not client.collection_exists(COLLECTION_NAME):
+                    from qdrant_client.models import Distance, VectorParams
+                    # Assuming gemini-embedding-001 has size 768
+                    client.create_collection(
+                        collection_name=COLLECTION_NAME,
+                        vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+                    )
+
                 self.vector_store = QdrantVectorStore(
-                    client=get_qdrant_client(),
+                    client=client,
                     collection_name=COLLECTION_NAME,
                     embedding=embeddings,
                 )
