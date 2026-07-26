@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from app.services.loader import Doc_loader
 from app.utils.chunks import process_elements
-from app.services.storage import store_chunks
+from app.services.storage import store_manager
 from app.RAG.graph import rag_app, GraphState
 
 app = FastAPI()
@@ -49,8 +49,19 @@ async def initialize(req: InitRequest):
     try:
         url = req.doc_url
         docs = Doc_loader(url)
-        chunks = await process_elements(url, "Document Title", docs)
-        store_chunks(chunks)
+
+        # Convert Document objects to the format expected by process_elements
+        elements = [
+            {
+                "type": "text",
+                "content": doc.page_content,
+                "heading": doc.metadata.get("section_heading", "")
+            }
+            for doc in docs
+        ]
+
+        chunks = await process_elements(url, "Document Title", elements)
+        await store_manager.add_documents(chunks, url)
         initialized = True
         return {"status": "success"}
     except Exception as e:
