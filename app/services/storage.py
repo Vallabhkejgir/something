@@ -95,10 +95,11 @@ class VectorStoreManager:
                         vectors_config=VectorParams(size=768, distance=Distance.COSINE),
                     )
 
-                self.vector_store = QdrantVectorStore(
-                    client=client,
+                self.vector_store = QdrantVectorStore.construct_instance(
+                    client_options={"path": "app/services/qdrant_data"},
                     collection_name=COLLECTION_NAME,
                     embedding=embeddings,
+                    force_recreate=True,
                 )
 
             await asyncio.to_thread(self.vector_store.add_documents, index_docs)
@@ -155,10 +156,11 @@ class VectorStoreManager:
     def get_vector_store(self):
         if self.vector_store is None:
             try:
-                self.vector_store = QdrantVectorStore(
-                    client=get_qdrant_client(),
+                self.vector_store = QdrantVectorStore.construct_instance(
+                    client_options={"path": "app/services/qdrant_data"},
                     collection_name=COLLECTION_NAME,
                     embedding=embeddings,
+                    force_recreate=True,
                 )
             except Exception:
                 pass
