@@ -75,19 +75,20 @@ async def retrieve_context(state):
 
     all_docs = []
 
-    for q in queries:
-        # Dense Retrieval
-        dense_docs = await retriever.ainvoke(q)
-
-        # Sparse Retrieval (BM25)
-        sparse_results = []
+    async def process_query(q):
+        dense_coro = retriever.ainvoke(q)
         if bm25_retriever:
-            sparse_results = await bm25_retriever.ainvoke(q)
-
-        # RRF Fusion
+            sparse_coro = bm25_retriever.ainvoke(q)
+            dense_docs, sparse_results = await asyncio.gather(dense_coro, sparse_coro)
+        else:
+            dense_docs = await dense_coro
+            sparse_results = []
         fused_docs = storage.store_manager.reciprocal_rank_fusion(dense_docs, sparse_results)
-        # Take top 5 from fused results
-        all_docs.extend(fused_docs[:5])
+        return fused_docs[:5]
+
+    results = await asyncio.gather(*(process_query(q) for q in queries))
+    for fused_docs in results:
+        all_docs.extend(fused_docs)
 
     unique_docs = {}
     for d in all_docs:
