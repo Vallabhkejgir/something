@@ -1,7 +1,7 @@
 import asyncio
 import time
 
-class TokenBucket:
+class TokenBucket2:
     def __init__(self, max_tokens_per_min, max_requests_per_min):
         self.max_tokens = float(max_tokens_per_min)
         self.tokens = float(max_tokens_per_min)
@@ -18,7 +18,7 @@ class TokenBucket:
 
     async def acquire(self, tokens_needed=1):
         if tokens_needed > self.max_tokens:
-            raise ValueError(f"tokens_needed ({tokens_needed}) exceeds max_tokens ({self.max_tokens})")
+            raise ValueError(f"tokens_needed exceeds max_tokens")
         while True:
             wait_time = 0.0
             async with self.lock:
@@ -34,10 +34,10 @@ class TokenBucket:
 
                 if self.tokens < tokens_needed or self.requests < 1:
                     deficit_tokens = max(0, tokens_needed - self.tokens)
-                    token_wait = deficit_tokens / refill_rate_tokens if refill_rate_tokens > 0 else 0.0
+                    token_wait = deficit_tokens / refill_rate_tokens if refill_rate_tokens > 0 else 0
                     
                     deficit_reqs = max(0, 1 - self.requests)
-                    req_wait = deficit_reqs / refill_rate_requests if refill_rate_requests > 0 else 0.0
+                    req_wait = deficit_reqs / refill_rate_requests if refill_rate_requests > 0 else 0
                     
                     wait_time = max(token_wait, req_wait)
 
@@ -46,5 +46,17 @@ class TokenBucket:
                     self.requests -= 1
                     return
 
-            # Sleep outside the lock so other coroutines are not blocked
             await asyncio.sleep(wait_time)
+
+async def main():
+    tb = TokenBucket2(max_tokens_per_min=60, max_requests_per_min=60)
+    
+    async def worker(id):
+        await tb.acquire(1)
+        print(f"Worker {id} acquired at {time.time()}")
+
+    start = time.time()
+    await asyncio.gather(*(worker(i) for i in range(5)))
+    print(f"Total time: {time.time() - start}")
+
+asyncio.run(main())
