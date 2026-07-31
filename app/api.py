@@ -9,6 +9,7 @@ from app.services.loader import Doc_loader
 from app.utils.chunks import process_elements
 from app.services.storage import store_manager
 from app.RAG.graph import rag_app, GraphState
+from app.services.cache import query_cache
 
 app = FastAPI()
 
@@ -74,6 +75,12 @@ async def query(req: QueryRequest):
         return JSONResponse(status_code=400, content={"error": "Load docs first"})
 
     user_prompt = req.prompt
+    
+    # Try to fetch from cache first
+    cached_result = await query_cache.get(user_prompt, store_manager.index_version)
+    if cached_result:
+        return {"answer": cached_result["answer"]}
+
     inputs = GraphState(
         question=user_prompt,
         category="",
@@ -90,6 +97,11 @@ async def query(req: QueryRequest):
 
     try:
         final_state = await rag_app.ainvoke(inputs)
+        
+        # Save successful result to cache in background to avoid blocking response
+        import asyncio
+        asyncio.create_task(query_cache.set(user_prompt, {"answer": final_state["answer"]}, store_manager.index_version))
+        
         return {"answer": final_state["answer"]}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
