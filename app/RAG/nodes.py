@@ -61,6 +61,7 @@ async def rewrite_query(state):
         print("---USING SPECULATIVE REWRITE FALLBACK---")
         try:
             queries, ret_data, grade_task, gen_task, faith_task = await speculative_fallback
+            new_fallback_task = asyncio.create_task(_do_rewrite_and_retrieve_grade_generate(state["question"]))
             return {
                 "rewritten_queries": queries,
                 "speculative_context": ret_data["context"],
@@ -68,7 +69,7 @@ async def rewrite_query(state):
                 "speculative_grade_task": grade_task,
                 "speculative_generate_task": gen_task,
                 "speculative_faithfulness_task": faith_task,
-                "speculative_rewrite_fallback_task": None,
+                "speculative_rewrite_fallback_task": new_fallback_task,
             }
         except Exception as e:
             print(f"---SPECULATIVE FALLBACK FAILED: {e}---")
@@ -152,22 +153,22 @@ async def _do_retrieve(queries):
 async def _do_retrieve_grade_generate(queries, question):
     retrieved_data = await _do_retrieve(queries)
     chunks = retrieved_data["retrieved_chunks"]
-    
+
     if not chunks:
         async def empty_grade(): return "[]"
         async def empty_gen(): return ""
         async def empty_faith(): return "yes"
         return retrieved_data, asyncio.create_task(empty_grade()), asyncio.create_task(empty_gen()), asyncio.create_task(empty_faith())
-        
+
     formatted_chunks = "\n---\n".join([f"Chunk {i+1}:\n{chunk}" for i, chunk in enumerate(chunks)])
     unfiltered_context = "\n\n".join(chunks)
-    
+
     async def run_grade():
         return await (relevance_prompt | llm | StrOutputParser()).ainvoke({
             "question": question,
             "chunks": formatted_chunks,
         })
-        
+
     async def run_generate():
         tokens = (len(question) + len(unfiltered_context)) // 4
         await GEN_LLM_LIMITER.acquire(max(tokens, 1))
@@ -175,10 +176,10 @@ async def _do_retrieve_grade_generate(queries, question):
             "context": unfiltered_context,
             "question": question,
         })
-        
+
     grade_task = asyncio.create_task(run_grade())
     generate_task = asyncio.create_task(run_generate())
-    
+
     async def run_faithfulness():
         try:
             ans = await generate_task
@@ -188,10 +189,16 @@ async def _do_retrieve_grade_generate(queries, question):
             "context": unfiltered_context,
             "answer": ans,
         })
-        
+
     faith_task = asyncio.create_task(run_faithfulness())
-    
+
     return retrieved_data, grade_task, generate_task, faith_task
+
+async def _do_rewrite_and_retrieve_grade_generate(question):
+    res = await (rewrite_prompt | llm | StrOutputParser()).ainvoke({"question": question})
+    queries = [q.strip() for q in res.split("\n") if q.strip()]
+    ret_data, grade_task, gen_task, faith_task = await _do_retrieve_grade_generate(queries, question)
+    return queries, ret_data, grade_task, gen_task, faith_task
 
 async def retrieve_context(state):
     print("---NODE: RETRIEVE---")
@@ -304,10 +311,7 @@ async def categorize_question(state):
         return res.strip().lower()
 
     async def get_rewritten_and_retrieve():
-        res = await (rewrite_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
-        queries = [q.strip() for q in res.split("\n") if q.strip()]
-        ret_data, grade_task, gen_task, faith_task = await _do_retrieve_grade_generate(queries, state["question"])
-        return queries, ret_data, grade_task, gen_task, faith_task
+        return await _do_rewrite_and_retrieve_grade_generate(state["question"])
 
     async def get_decomposed_and_retrieve():
         res = await (decompose_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
@@ -329,6 +333,8 @@ async def categorize_question(state):
         grade_task.cancel()
         generate_task.cancel()
         faith_task.cancel()
+        # We need a new rewrite_task running as a fallback for vague!
+        new_fallback_task = asyncio.create_task(get_rewritten_and_retrieve())
         return {
             "category": category,
             "context": retrieved_data["context"],
@@ -339,7 +345,7 @@ async def categorize_question(state):
             "speculative_grade_task": g_task,
             "speculative_generate_task": gen_task,
             "speculative_faithfulness_task": f_task,
-            "speculative_rewrite_fallback_task": None,
+            "speculative_rewrite_fallback_task": new_fallback_task,
         }
     elif category == "complex":
         queries, ret_data, g_task, gen_task, f_task = await decompose_task
