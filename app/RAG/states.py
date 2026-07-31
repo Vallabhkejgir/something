@@ -1,6 +1,6 @@
-from typing import List, TypedDict
+from typing import List, TypedDict, Any
 
-class GraphState(TypedDict):
+class GraphState(TypedDict, total=False):
     question: str
     category: str           # Added for routing
     rewritten_queries: List[str]
@@ -16,3 +16,5 @@ class GraphState(TypedDict):
     speculative_sub_queries: List[str]
     speculative_context: str
     speculative_retrieved_chunks: List[str]
+    speculative_grade_task: Any
+    speculative_generate_task: Any
