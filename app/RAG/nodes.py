@@ -365,22 +365,30 @@ async def categorize_question(state):
 
     rewrite_task = asyncio.create_task(get_rewritten_and_retrieve())
     decompose_task = asyncio.create_task(get_decomposed_and_retrieve())
+    concise_task = asyncio.create_task(_do_retrieve_grade_generate([state["question"]], state["question"]))
 
-    category, (retrieved_data, grade_task, generate_task, faith_task) = await asyncio.gather(
-        get_category(),
-        _do_retrieve_grade_generate([state["question"]], state["question"])
-    )
+    category = await get_category()
+
+    def cancel_concise_task():
+        if concise_task.done():
+            try:
+                _, g_task, gen_task, f_task = concise_task.result()
+                g_task.cancel()
+                gen_task.cancel()
+                f_task.cancel()
+            except Exception:
+                pass
+        else:
+            concise_task.cancel()
 
     if category == "vague":
         queries, ret_data, g_task, gen_task, f_task = await rewrite_task
         # Keep decompose_task running as a diverse fallback for vague!
-        grade_task.cancel()
-        generate_task.cancel()
-        faith_task.cancel()
+        cancel_concise_task()
         return {
             "category": category,
-            "context": retrieved_data["context"],
-            "retrieved_chunks": retrieved_data["retrieved_chunks"],
+            "context": ret_data["context"],
+            "retrieved_chunks": ret_data["retrieved_chunks"],
             "speculative_rewritten_queries": queries,
             "speculative_context": ret_data["context"],
             "speculative_retrieved_chunks": ret_data["retrieved_chunks"],
@@ -392,13 +400,11 @@ async def categorize_question(state):
     elif category == "complex":
         queries, ret_data, g_task, gen_task, f_task = await decompose_task
         # We KEEP rewrite_task running as a fallback!
-        grade_task.cancel()
-        generate_task.cancel()
-        faith_task.cancel()
+        cancel_concise_task()
         return {
             "category": category,
-            "context": retrieved_data["context"],
-            "retrieved_chunks": retrieved_data["retrieved_chunks"],
+            "context": ret_data["context"],
+            "retrieved_chunks": ret_data["retrieved_chunks"],
             "speculative_sub_queries": queries,
             "speculative_context": ret_data["context"],
             "speculative_retrieved_chunks": ret_data["retrieved_chunks"],
@@ -410,6 +416,7 @@ async def categorize_question(state):
     else:
         # We KEEP rewrite_task running as a fallback!
         decompose_task.cancel()
+        retrieved_data, grade_task, generate_task, faith_task = await concise_task
         return {
             "category": category,
             "context": retrieved_data["context"],
