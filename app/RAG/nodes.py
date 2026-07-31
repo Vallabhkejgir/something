@@ -170,6 +170,8 @@ async def _do_retrieve_grade_generate(queries, question):
         })
 
     async def run_generate():
+        if not unfiltered_context.strip():
+            return "I don't have enough information in the retrieved context."
         tokens = (len(question) + len(unfiltered_context)) // 4
         await GEN_LLM_LIMITER.acquire(max(tokens, 1))
         return await (prompt | llm | StrOutputParser()).ainvoke({
@@ -185,6 +187,8 @@ async def _do_retrieve_grade_generate(queries, question):
             ans = await generate_task
         except asyncio.CancelledError:
             raise
+        if not unfiltered_context.strip():
+            return "yes"
         return await (faithfulness_prompt | llm | StrOutputParser()).ainvoke({
             "context": unfiltered_context,
             "answer": ans,
@@ -279,10 +283,41 @@ async def relevance_grader(state):
         speculative_ans = await generate_task
         return {"context": filtered_context, "relevance_scores": scores, "speculative_answer": speculative_ans, "speculative_faithfulness_task": faith_task}
     else:
-        # We don't need it. We can cancel it to save resources!
+        # We don't need the unfiltered ones. Cancel them!
         generate_task.cancel()
         faith_task.cancel()
-        return {"context": filtered_context, "relevance_scores": scores, "speculative_answer": "", "speculative_faithfulness_task": None}
+        
+        # Pipeline the filtered ones!
+        async def run_filtered_generate():
+            if not filtered_context.strip():
+                return "I don't have enough information in the retrieved context."
+            tokens = (len(state["question"]) + len(filtered_context)) // 4
+            await GEN_LLM_LIMITER.acquire(max(tokens, 1))
+            return await (prompt | llm | StrOutputParser()).ainvoke({
+                "context": filtered_context,
+                "question": state["question"],
+            })
+            
+        new_gen = asyncio.create_task(run_filtered_generate())
+        
+        async def run_filtered_faith():
+            ans = await new_gen
+            if not filtered_context.strip():
+                return "yes"
+            return await (faithfulness_prompt | llm | StrOutputParser()).ainvoke({
+                "context": filtered_context,
+                "answer": ans,
+            })
+            
+        new_faith = asyncio.create_task(run_filtered_faith())
+        
+        return {
+            "context": filtered_context, 
+            "relevance_scores": scores, 
+            "speculative_answer": "", 
+            "speculative_generate_task": new_gen,
+            "speculative_faithfulness_task": new_faith
+        }
 
 
 async def generate_answer(state):
@@ -293,6 +328,15 @@ async def generate_answer(state):
         print("---USING SPECULATIVE ANSWER---")
         return {"answer": speculative_ans}
         
+    spec_gen = state.get("speculative_generate_task")
+    if spec_gen:
+        print("---USING SPECULATIVE GENERATE TASK---")
+        ans = await spec_gen
+        return {"answer": ans}
+        
+    if not state.get("context", "").strip():
+        return {"answer": "I don't have enough information in the retrieved context."}
+
     tokens = (len(state["question"]) + len(state.get("context", ""))) // 4
     await GEN_LLM_LIMITER.acquire(max(tokens, 1))
 
@@ -329,12 +373,10 @@ async def categorize_question(state):
 
     if category == "vague":
         queries, ret_data, g_task, gen_task, f_task = await rewrite_task
-        decompose_task.cancel()
+        # Keep decompose_task running as a diverse fallback for vague!
         grade_task.cancel()
         generate_task.cancel()
         faith_task.cancel()
-        # We need a new rewrite_task running as a fallback for vague!
-        new_fallback_task = asyncio.create_task(get_rewritten_and_retrieve())
         return {
             "category": category,
             "context": retrieved_data["context"],
@@ -345,7 +387,7 @@ async def categorize_question(state):
             "speculative_grade_task": g_task,
             "speculative_generate_task": gen_task,
             "speculative_faithfulness_task": f_task,
-            "speculative_rewrite_fallback_task": new_fallback_task,
+            "speculative_rewrite_fallback_task": decompose_task,
         }
     elif category == "complex":
         queries, ret_data, g_task, gen_task, f_task = await decompose_task
@@ -390,15 +432,21 @@ async def faithfulness_checker(state):
         try:
             res = await spec_faith
         except asyncio.CancelledError:
+            if not state.get("context", "").strip():
+                res = "yes"
+            else:
+                res = await (faithfulness_prompt | llm | StrOutputParser()).ainvoke({
+                    "context": state.get("context", ""),
+                    "answer": state.get("answer", ""),
+                })
+    else:
+        if not state.get("context", "").strip():
+            res = "yes"
+        else:
             res = await (faithfulness_prompt | llm | StrOutputParser()).ainvoke({
                 "context": state.get("context", ""),
                 "answer": state.get("answer", ""),
             })
-    else:
-        res = await (faithfulness_prompt | llm | StrOutputParser()).ainvoke({
-            "context": state.get("context", ""),
-            "answer": state.get("answer", ""),
-        })
 
     is_faithful = "yes" in res.strip().lower()
 
