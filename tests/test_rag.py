@@ -1,4 +1,5 @@
 import pytest
+import asyncio
 from unittest.mock import AsyncMock, patch
 from app.RAG.nodes import (
     parse_json_bool_array,
@@ -68,3 +69,21 @@ async def test_relevance_grader_batched():
         res = await relevance_grader(state)
         assert res["relevance_scores"] == [True, False]
         assert res["context"] == "The sky is blue."
+
+@pytest.mark.anyio
+async def test_faithfulness_checker_speculative():
+    async def mock_speculative_faithfulness():
+        return "yes"
+
+    spec_task = asyncio.create_task(mock_speculative_faithfulness())
+    state = {
+        "context": "The sky is blue.",
+        "answer": "The sky is blue.",
+        "retry_count": 0,
+        "speculative_faithfulness_task": spec_task
+    }
+
+    res = await faithfulness_checker(state)
+    assert res["is_faithful"] is True
+    assert res["faithfulness"] == "faithful"
+    assert res["retry_count"] == 0

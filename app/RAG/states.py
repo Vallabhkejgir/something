@@ -18,3 +18,4 @@ class GraphState(TypedDict, total=False):
     speculative_retrieved_chunks: List[str]
     speculative_grade_task: Any
     speculative_generate_task: Any
+    speculative_faithfulness_task: Any
