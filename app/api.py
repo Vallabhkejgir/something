@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -70,7 +70,7 @@ async def initialize(req: InitRequest):
 
 
 @app.post("/api/query")
-async def query(req: QueryRequest):
+async def query(req: QueryRequest, background_tasks: BackgroundTasks):
     if not initialized:
         return JSONResponse(status_code=400, content={"error": "Load docs first"})
 
@@ -99,8 +99,7 @@ async def query(req: QueryRequest):
         final_state = await rag_app.ainvoke(inputs)
         
         # Save successful result to cache in background to avoid blocking response
-        import asyncio
-        asyncio.create_task(query_cache.set(user_prompt, {"answer": final_state["answer"]}, store_manager.index_version))
+        background_tasks.add_task(query_cache.set, user_prompt, {"answer": final_state["answer"]}, store_manager.index_version)
         
         return {"answer": final_state["answer"]}
     except Exception as e:
