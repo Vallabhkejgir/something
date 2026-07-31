@@ -5,9 +5,9 @@ class TokenBucket:
     def __init__(self, max_tokens_per_min, max_requests_per_min):
         self.max_tokens = float(max_tokens_per_min)
         self.tokens = float(max_tokens_per_min)
+        self.max_requests = float(max_requests_per_min)
+        self.requests = float(max_requests_per_min)
         self.updated_at = time.time()
-        self.request_interval = 60.0 / max_requests_per_min if max_requests_per_min > 0 else 0.0
-        self.last_request_time = 0.0
         self._lock = None
 
     @property
@@ -24,22 +24,26 @@ class TokenBucket:
             async with self.lock:
                 now = time.time()
                 elapsed = now - self.updated_at
-                refill_rate = self.max_tokens / 60.0
-                self.tokens = min(self.max_tokens, self.tokens + (elapsed * refill_rate))
+                
+                refill_rate_tokens = self.max_tokens / 60.0
+                refill_rate_requests = self.max_requests / 60.0
+                
+                self.tokens = min(self.max_tokens, self.tokens + (elapsed * refill_rate_tokens))
+                self.requests = min(self.max_requests, self.requests + (elapsed * refill_rate_requests))
                 self.updated_at = now
 
-                time_since_last_req = now - self.last_request_time
-                if time_since_last_req < self.request_interval:
-                    wait_time = max(wait_time, self.request_interval - time_since_last_req)
-
-                if self.tokens < tokens_needed:
-                    deficit = tokens_needed - self.tokens
-                    token_wait = max(deficit / refill_rate, 1.0)
-                    wait_time = max(wait_time, token_wait)
+                if self.tokens < tokens_needed or self.requests < 1:
+                    deficit_tokens = max(0, tokens_needed - self.tokens)
+                    token_wait = deficit_tokens / refill_rate_tokens if refill_rate_tokens > 0 else 0.0
+                    
+                    deficit_reqs = max(0, 1 - self.requests)
+                    req_wait = deficit_reqs / refill_rate_requests if refill_rate_requests > 0 else 0.0
+                    
+                    wait_time = max(token_wait, req_wait)
 
                 if wait_time <= 0:
                     self.tokens -= tokens_needed
-                    self.last_request_time = now
+                    self.requests -= 1
                     return
 
             # Sleep outside the lock so other coroutines are not blocked

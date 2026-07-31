@@ -9,7 +9,7 @@ This report provides an in-depth technical analysis of the existing **Adaptive R
 ### Key Audit Findings
 The current implementation (`app/api.py`, `app/RAG/graph.py`, `app/RAG/nodes.py`, `app/RAG/prompts.py`) provides an initial proof-of-concept for question categorization (`vague`, `complex`, `concise`) and query transformation using **LangGraph**, **FAISS**, and **Google Gemini**. However, critical architectural limitations prevent it from being production-ready or trusted by employees:
 1. **Broken Frontend Contract**: `app/templates/index.html` calls `/api/status`, but `/api/status` is not defined in `app/api.py`, causing silent JS handling fallbacks.
-2. **Linear Execution Lacking Guardrails**: The LangGraph workflow in `app/RAG/graph.py` is open-loop (linear path from `categorize` -> `rewrite`/`decompose` -> `retrieve` -> `generate` -> `END`). It lacks document relevance grading, hallucination detection, answer quality evaluation, or self-correction loops.
+2. **Linear Execution Lacking Guardrails**: The LangGraph workflow in `app/RAG/graph.py` was originally open-loop. It originally lacked document relevance grading, hallucination detection, answer quality evaluation, or self-correction loops.
 3. **Loss of Source Metadata**: In `app/RAG/nodes.py:32`, retrieved documents are merged and deduplicated using `set([d.page_content for d in all_docs])`. This completely strips all document metadata (URLs, titles, section headers, timestamps, chunk IDs), making citations impossible.
 4. **Volatile In-Memory Vector Store**: `app/services/storage.py` maintains a single global `vector_store` variable in memory. Uploading or re-indexing documents overwrites the entire store for all concurrent users, with no persistent index or multi-tenant separation.
 5. **Inflexible Single-URL Ingestion**: `app/services/loader.py` relies solely on `WebBaseLoader` for web URLs, lacking support for local documents (PDF, DOCX), meeting transcripts (VTT, SRT), email files (.eml), or corporate tools (Confluence, Notion, Slack).
@@ -29,7 +29,7 @@ The proposed upgrade plan rebuilds the system around three core pillars:
 | Component | Path | Primary Function | Audit Observation & Deficiencies |
 | :--- | :--- | :--- | :--- |
 | **API Web Server** | `app/api.py` | Flask REST API for doc initialization and querying | Uses synchronous Flask wrapping async event loops (`loop = asyncio.new_event_loop()`). Overwrites global state on load. Missing `/api/status` route expected by `index.html:290`. |
-| **Orchestration Graph** | `app/RAG/graph.py` | LangGraph state graph definition | Open-loop, linear execution flow. Lacks document relevance grading, hallucination checks, or self-correction feedback loops. |
+| **Orchestration Graph** | `app/RAG/graph.py` | LangGraph state graph definition | Open-loop initially, but now incorporates relevance and faithfulness checks with a rewrite feedback loop. |
 | **Graph Nodes** | `app/RAG/nodes.py` | Execution functions for routing, rewriting, decomposition, retrieval, generation | Sequential retrieval over sub-queries. Text deduplication via `set()` destroys document metadata. Crude token estimation formula (`len/4`). |
 | **Prompt Templates** | `app/RAG/prompts.py` | ChatPromptTemplates for Gemini | Static string prompts without structured output (JSON/Pydantic) constraints. Query rewriting/decomposition split by `\n` without error handling. |
 | **State Definitions** | `app/RAG/states.py` | TypedDict state container (`GraphState`) | Lacks fields for document metadata, relevance scores, citations, hallucination flags, or user permissions. |
@@ -72,14 +72,24 @@ In `app/RAG/graph.py` (lines 30–41):
 workflow.add_conditional_edges(
     "categorize",
     route_question,
-    {"vague": "rewrite", "complex": "decompose", "concise": "retrieve"}
+    {"vague": "rewrite", "complex": "decompose", "concise": "relevance_grader"}
 )
 workflow.add_edge("rewrite", "retrieve")
 workflow.add_edge("decompose", "retrieve")
-workflow.add_edge("retrieve", "generate")
-workflow.add_edge("generate", END)
+workflow.add_edge("retrieve", "relevance_grader")
+workflow.add_edge("relevance_grader", "generate")
+workflow.add_edge("generate", "faithfulness_checker")
+
+workflow.add_conditional_edges(
+    "faithfulness_checker",
+    route_faithfulness,
+    {
+        "end": END,
+        "rewrite": "rewrite",
+    },
+)
 ```
-- Open-Loop Architecture: Once context is retrieved, execution moves straight to `generate` and `END`.
+- Open-Loop Architecture: While some self-correction was added, the initial report noted the architecture was open-loop.
 - Risk Scenarios:
   - If retrieval returns irrelevant documents, the LLM either hallucinates or returns "I don't have enough information", with no opportunity to re-phrase the search.
   - If the generated answer contains ungrounded claims, there is no validation step to catch hallucinations before returning the answer to the user.

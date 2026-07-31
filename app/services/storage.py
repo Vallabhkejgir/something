@@ -112,7 +112,7 @@ class VectorStoreManager:
                     embedding=embeddings,
                 )
 
-            await asyncio.to_thread(self.vector_store.add_documents, index_docs)
+            await self.vector_store.aadd_documents(index_docs)
 
             # Rebuild BM25 from ALL accumulated docs
             logger.info("Rebuilding BM25 over %d total docs...", len(self._all_index_docs))

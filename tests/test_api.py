@@ -1,3 +1,4 @@
+from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 from unittest.mock import patch, AsyncMock
 from app.api import app
@@ -20,10 +21,15 @@ def test_query_uninitialized():
     assert response.json()["error"] == "Load docs first"
 
 @patch("app.api.Doc_loader")
-@patch("app.api.process_elements")
-@patch("app.api.store_chunks")
-def test_initialize_and_query(mock_store, mock_chunk, mock_loader):
-    mock_loader.return_value = ["doc"]
+@patch("app.api.process_elements", new_callable=AsyncMock)
+@patch("app.api.store_manager.add_documents", new_callable=AsyncMock)
+def test_initialize_and_query(mock_add_docs, mock_chunk, mock_loader):
+
+    mock_doc = MagicMock()
+    mock_doc.page_content = "content"
+    mock_doc.metadata = {"section_heading": "heading"}
+    mock_loader.return_value = [mock_doc]
+
     mock_chunk.return_value = ["chunk"]
 
     init_response = client.post("/api/initialize", json={"doc_url": "https://example.com"})

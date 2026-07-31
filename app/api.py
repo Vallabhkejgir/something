@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,6 +9,7 @@ from app.services.loader import Doc_loader
 from app.utils.chunks import process_elements
 from app.services.storage import store_manager
 from app.RAG.graph import rag_app, GraphState
+from app.services.cache import query_cache
 
 app = FastAPI()
 
@@ -69,11 +70,17 @@ async def initialize(req: InitRequest):
 
 
 @app.post("/api/query")
-async def query(req: QueryRequest):
+async def query(req: QueryRequest, background_tasks: BackgroundTasks):
     if not initialized:
         return JSONResponse(status_code=400, content={"error": "Load docs first"})
 
     user_prompt = req.prompt
+    
+    # Try to fetch from cache first
+    cached_result = await query_cache.get(user_prompt, store_manager.index_version)
+    if cached_result:
+        return {"answer": cached_result["answer"]}
+
     inputs = GraphState(
         question=user_prompt,
         category="",
@@ -85,10 +92,15 @@ async def query(req: QueryRequest):
         is_faithful=True,
         relevance_scores=[],
         retrieved_chunks=[],
+        speculative_answer="",
     )
 
     try:
         final_state = await rag_app.ainvoke(inputs)
+        
+        # Save successful result to cache in background to avoid blocking response
+        background_tasks.add_task(query_cache.set, user_prompt, {"answer": final_state["answer"]}, store_manager.index_version)
+        
         return {"answer": final_state["answer"]}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
