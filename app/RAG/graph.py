@@ -50,7 +50,7 @@ workflow.add_conditional_edges(
     {
         "vague": "rewrite",
         "complex": "decompose",
-        "concise": "retrieve",
+        "concise": "relevance_grader",
     },
 )
 

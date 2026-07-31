@@ -59,19 +59,14 @@ async def decompose_query(state):
     return {"sub_queries": [q.strip() for q in res.split("\n") if q.strip()]}
 
 
-async def retrieve_context(state):
-    print("---NODE: RETRIEVE---")
+
+async def _do_retrieve(queries):
     store = storage.store_manager.get_vector_store()
     if store is None:
         raise ValueError("Vector Store not initialized")
 
     bm25_retriever = storage.store_manager.bm25_retriever
-
     retriever = store.as_retriever(search_kwargs={"k": 5})
-
-    queries = state.get("rewritten_queries", []) + state.get("sub_queries", [])
-    if not queries:
-        queries = [state["question"]]
 
     all_docs = []
 
@@ -107,6 +102,13 @@ async def retrieve_context(state):
 
     context = "\n\n".join(unique_contents)
     return {"context": context, "retrieved_chunks": unique_contents}
+
+async def retrieve_context(state):
+    print("---NODE: RETRIEVE---")
+    queries = state.get("rewritten_queries", []) + state.get("sub_queries", [])
+    if not queries:
+        queries = [state["question"]]
+    return await _do_retrieve(queries)
 
 
 async def relevance_grader(state):
@@ -150,9 +152,21 @@ async def generate_answer(state):
 
 async def categorize_question(state):
     print("---NODE: CATEGORIZE---")
-    res = await (categorize_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
-    category = res.strip().lower()
-    return {"category": category}
+    
+    async def get_category():
+        res = await (categorize_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
+        return res.strip().lower()
+        
+    category, retrieved_data = await asyncio.gather(
+        get_category(),
+        _do_retrieve([state["question"]])
+    )
+    
+    return {
+        "category": category,
+        "context": retrieved_data["context"],
+        "retrieved_chunks": retrieved_data["retrieved_chunks"]
+    }
 
 
 async def faithfulness_checker(state):
