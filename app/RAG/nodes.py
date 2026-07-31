@@ -49,12 +49,20 @@ def parse_json_bool_array(text: str, default_length: int) -> List[bool]:
 
 async def rewrite_query(state):
     print("---NODE: REWRITE---")
+    speculative = state.get("speculative_rewritten_queries")
+    if speculative:
+        print("---USING SPECULATIVE REWRITTEN QUERIES---")
+        return {"rewritten_queries": speculative}
     res = await (rewrite_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
     return {"rewritten_queries": [q.strip() for q in res.split("\n") if q.strip()]}
 
 
 async def decompose_query(state):
     print("---NODE: DECOMPOSE---")
+    speculative = state.get("speculative_sub_queries")
+    if speculative:
+        print("---USING SPECULATIVE SUB-QUERIES---")
+        return {"sub_queries": speculative}
     res = await (decompose_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
     return {"sub_queries": [q.strip() for q in res.split("\n") if q.strip()]}
 
@@ -182,21 +190,49 @@ async def generate_answer(state):
 
 async def categorize_question(state):
     print("---NODE: CATEGORIZE---")
-    
+
     async def get_category():
         res = await (categorize_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
         return res.strip().lower()
-        
+
+    rewrite_task = asyncio.create_task(
+        (rewrite_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
+    )
+    decompose_task = asyncio.create_task(
+        (decompose_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
+    )
+
     category, retrieved_data = await asyncio.gather(
         get_category(),
         _do_retrieve([state["question"]])
     )
-    
-    return {
-        "category": category,
-        "context": retrieved_data["context"],
-        "retrieved_chunks": retrieved_data["retrieved_chunks"]
-    }
+
+    if category == "vague":
+        res = await rewrite_task
+        decompose_task.cancel()
+        return {
+            "category": category,
+            "context": retrieved_data["context"],
+            "retrieved_chunks": retrieved_data["retrieved_chunks"],
+            "speculative_rewritten_queries": [q.strip() for q in res.split("\n") if q.strip()]
+        }
+    elif category == "complex":
+        res = await decompose_task
+        rewrite_task.cancel()
+        return {
+            "category": category,
+            "context": retrieved_data["context"],
+            "retrieved_chunks": retrieved_data["retrieved_chunks"],
+            "speculative_sub_queries": [q.strip() for q in res.split("\n") if q.strip()]
+        }
+    else:
+        rewrite_task.cancel()
+        decompose_task.cancel()
+        return {
+            "category": category,
+            "context": retrieved_data["context"],
+            "retrieved_chunks": retrieved_data["retrieved_chunks"]
+        }
 
 
 async def faithfulness_checker(state):

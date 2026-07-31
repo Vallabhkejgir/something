@@ -12,3 +12,5 @@ class GraphState(TypedDict):
     relevance_scores: List[bool]
     retrieved_chunks: List[str]
     speculative_answer: str
+    speculative_rewritten_queries: List[str]
+    speculative_sub_queries: List[str]
