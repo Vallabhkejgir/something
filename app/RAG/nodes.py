@@ -50,12 +50,39 @@ def parse_json_bool_array(text: str, default_length: int) -> List[bool]:
 async def rewrite_query(state):
     print("---NODE: REWRITE---")
     speculative = state.get("speculative_rewritten_queries")
+    speculative_fallback = state.get("speculative_rewrite_fallback_task")
     retry_count = state.get("retry_count", 0)
+    
     if speculative and retry_count == 0:
         print("---USING SPECULATIVE REWRITTEN QUERIES---")
         return {"rewritten_queries": speculative}
+        
+    if speculative_fallback:
+        print("---USING SPECULATIVE REWRITE FALLBACK---")
+        try:
+            queries, ret_data, grade_task, gen_task, faith_task = await speculative_fallback
+            return {
+                "rewritten_queries": queries,
+                "speculative_context": ret_data["context"],
+                "speculative_retrieved_chunks": ret_data["retrieved_chunks"],
+                "speculative_grade_task": grade_task,
+                "speculative_generate_task": gen_task,
+                "speculative_faithfulness_task": faith_task,
+                "speculative_rewrite_fallback_task": None,
+            }
+        except Exception as e:
+            print(f"---SPECULATIVE FALLBACK FAILED: {e}---")
+
     res = await (rewrite_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
-    return {"rewritten_queries": [q.strip() for q in res.split("\n") if q.strip()]}
+    return {
+        "rewritten_queries": [q.strip() for q in res.split("\n") if q.strip()],
+        "speculative_context": "",
+        "speculative_retrieved_chunks": [],
+        "speculative_grade_task": None,
+        "speculative_generate_task": None,
+        "speculative_faithfulness_task": None,
+        "speculative_rewrite_fallback_task": None,
+    }
 
 
 async def decompose_query(state):
@@ -66,7 +93,15 @@ async def decompose_query(state):
         print("---USING SPECULATIVE SUB-QUERIES---")
         return {"sub_queries": speculative}
     res = await (decompose_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
-    return {"sub_queries": [q.strip() for q in res.split("\n") if q.strip()]}
+    return {
+        "sub_queries": [q.strip() for q in res.split("\n") if q.strip()],
+        "speculative_context": "",
+        "speculative_retrieved_chunks": [],
+        "speculative_grade_task": None,
+        "speculative_generate_task": None,
+        "speculative_faithfulness_task": None,
+        "speculative_rewrite_fallback_task": None,
+    }
 
 
 
@@ -162,9 +197,8 @@ async def retrieve_context(state):
     print("---NODE: RETRIEVE---")
     spec_context = state.get("speculative_context")
     spec_chunks = state.get("speculative_retrieved_chunks")
-    retry_count = state.get("retry_count", 0)
     
-    if spec_context and spec_chunks and retry_count == 0:
+    if spec_context and spec_chunks:
         print("---USING SPECULATIVE RETRIEVAL---")
         return {"context": spec_context, "retrieved_chunks": spec_chunks}
 
@@ -180,7 +214,6 @@ async def relevance_grader(state):
     spec_grade = state.get("speculative_grade_task")
     spec_gen = state.get("speculative_generate_task")
     spec_faith = state.get("speculative_faithfulness_task")
-    retry_count = state.get("retry_count", 0)
 
     chunks = state.get("retrieved_chunks", [])
     if not chunks:
@@ -189,7 +222,7 @@ async def relevance_grader(state):
     if not chunks:
         return {"relevance_scores": [], "context": "", "speculative_answer": "", "speculative_faithfulness_task": None}
 
-    if spec_grade and spec_gen and spec_faith and retry_count == 0:
+    if spec_grade and spec_gen and spec_faith:
         print("---USING SPECULATIVE GRADE & GENERATE TASKS---")
         grade_task = spec_grade
         generate_task = spec_gen
@@ -306,10 +339,11 @@ async def categorize_question(state):
             "speculative_grade_task": g_task,
             "speculative_generate_task": gen_task,
             "speculative_faithfulness_task": f_task,
+            "speculative_rewrite_fallback_task": None,
         }
     elif category == "complex":
         queries, ret_data, g_task, gen_task, f_task = await decompose_task
-        rewrite_task.cancel()
+        # We KEEP rewrite_task running as a fallback!
         grade_task.cancel()
         generate_task.cancel()
         faith_task.cancel()
@@ -323,9 +357,10 @@ async def categorize_question(state):
             "speculative_grade_task": g_task,
             "speculative_generate_task": gen_task,
             "speculative_faithfulness_task": f_task,
+            "speculative_rewrite_fallback_task": rewrite_task,
         }
     else:
-        rewrite_task.cancel()
+        # We KEEP rewrite_task running as a fallback!
         decompose_task.cancel()
         return {
             "category": category,
@@ -334,6 +369,7 @@ async def categorize_question(state):
             "speculative_grade_task": grade_task,
             "speculative_generate_task": generate_task,
             "speculative_faithfulness_task": faith_task,
+            "speculative_rewrite_fallback_task": rewrite_task,
         }
 
 
@@ -343,7 +379,7 @@ async def faithfulness_checker(state):
     spec_faith = state.get("speculative_faithfulness_task")
     retry_count = state.get("retry_count", 0)
     
-    if spec_faith and retry_count == 0:
+    if spec_faith:
         print("---USING SPECULATIVE FAITHFULNESS---")
         try:
             res = await spec_faith

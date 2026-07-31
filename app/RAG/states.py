@@ -19,3 +19,4 @@ class GraphState(TypedDict, total=False):
     speculative_grade_task: Any
     speculative_generate_task: Any
     speculative_faithfulness_task: Any
+    speculative_rewrite_fallback_task: Any
