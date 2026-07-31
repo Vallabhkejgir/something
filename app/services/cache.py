@@ -34,10 +34,11 @@ _MAX_CACHE_SIZE    = 200    # Maximum number of cached entries
 
 class QueryCache:
     """
-    Semantic cache keyed by (query_embedding, index_version).
+    Semantic cache keyed by (query_embedding, index_version) and original query string.
 
     Structure per entry:
       {
+        "original_query": str,
         "embedding": List[float],
         "result":    dict,
         "index_version": int,
