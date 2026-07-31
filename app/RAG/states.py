@@ -14,3 +14,5 @@ class GraphState(TypedDict):
     speculative_answer: str
     speculative_rewritten_queries: List[str]
     speculative_sub_queries: List[str]
+    speculative_context: str
+    speculative_retrieved_chunks: List[str]

@@ -50,7 +50,8 @@ def parse_json_bool_array(text: str, default_length: int) -> List[bool]:
 async def rewrite_query(state):
     print("---NODE: REWRITE---")
     speculative = state.get("speculative_rewritten_queries")
-    if speculative:
+    retry_count = state.get("retry_count", 0)
+    if speculative and retry_count == 0:
         print("---USING SPECULATIVE REWRITTEN QUERIES---")
         return {"rewritten_queries": speculative}
     res = await (rewrite_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
@@ -60,7 +61,8 @@ async def rewrite_query(state):
 async def decompose_query(state):
     print("---NODE: DECOMPOSE---")
     speculative = state.get("speculative_sub_queries")
-    if speculative:
+    retry_count = state.get("retry_count", 0)
+    if speculative and retry_count == 0:
         print("---USING SPECULATIVE SUB-QUERIES---")
         return {"sub_queries": speculative}
     res = await (decompose_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
@@ -113,6 +115,14 @@ async def _do_retrieve(queries):
 
 async def retrieve_context(state):
     print("---NODE: RETRIEVE---")
+    spec_context = state.get("speculative_context")
+    spec_chunks = state.get("speculative_retrieved_chunks")
+    retry_count = state.get("retry_count", 0)
+    
+    if spec_context and spec_chunks and retry_count == 0:
+        print("---USING SPECULATIVE RETRIEVAL---")
+        return {"context": spec_context, "retrieved_chunks": spec_chunks}
+
     queries = state.get("rewritten_queries", []) + state.get("sub_queries", [])
     if not queries:
         queries = [state["question"]]
@@ -195,12 +205,20 @@ async def categorize_question(state):
         res = await (categorize_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
         return res.strip().lower()
 
-    rewrite_task = asyncio.create_task(
-        (rewrite_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
-    )
-    decompose_task = asyncio.create_task(
-        (decompose_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
-    )
+    async def get_rewritten_and_retrieve():
+        res = await (rewrite_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
+        queries = [q.strip() for q in res.split("\n") if q.strip()]
+        retrieved_data = await _do_retrieve(queries)
+        return queries, retrieved_data
+
+    async def get_decomposed_and_retrieve():
+        res = await (decompose_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
+        queries = [q.strip() for q in res.split("\n") if q.strip()]
+        retrieved_data = await _do_retrieve(queries)
+        return queries, retrieved_data
+
+    rewrite_task = asyncio.create_task(get_rewritten_and_retrieve())
+    decompose_task = asyncio.create_task(get_decomposed_and_retrieve())
 
     category, retrieved_data = await asyncio.gather(
         get_category(),
@@ -208,22 +226,26 @@ async def categorize_question(state):
     )
 
     if category == "vague":
-        res = await rewrite_task
+        queries, ret_data = await rewrite_task
         decompose_task.cancel()
         return {
             "category": category,
             "context": retrieved_data["context"],
             "retrieved_chunks": retrieved_data["retrieved_chunks"],
-            "speculative_rewritten_queries": [q.strip() for q in res.split("\n") if q.strip()]
+            "speculative_rewritten_queries": queries,
+            "speculative_context": ret_data["context"],
+            "speculative_retrieved_chunks": ret_data["retrieved_chunks"]
         }
     elif category == "complex":
-        res = await decompose_task
+        queries, ret_data = await decompose_task
         rewrite_task.cancel()
         return {
             "category": category,
             "context": retrieved_data["context"],
             "retrieved_chunks": retrieved_data["retrieved_chunks"],
-            "speculative_sub_queries": [q.strip() for q in res.split("\n") if q.strip()]
+            "speculative_sub_queries": queries,
+            "speculative_context": ret_data["context"],
+            "speculative_retrieved_chunks": ret_data["retrieved_chunks"]
         }
     else:
         rewrite_task.cancel()
