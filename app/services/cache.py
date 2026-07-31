@@ -34,10 +34,11 @@ _MAX_CACHE_SIZE    = 200    # Maximum number of cached entries
 
 class QueryCache:
     """
-    Semantic cache keyed by (query_embedding, index_version).
+    Semantic cache keyed by (query_embedding, index_version) and original query string.
 
     Structure per entry:
       {
+        "original_query": str,
         "embedding": List[float],
         "result":    dict,
         "index_version": int,
@@ -57,23 +58,33 @@ class QueryCache:
         if not self._store:
             return None
 
+        now = time.time()
+        
+        # 1. Fast path: exact string match (case-insensitive)
+        async with self._lock:
+            for entry in self._store:
+                if entry["index_version"] != index_version:
+                    continue
+                if now - entry["timestamp"] > _CACHE_TTL:
+                    continue
+                if entry.get("original_query", "").strip().lower() == query.strip().lower():
+                    logger.info("Cache HIT (exact match) for query: %.60s", query)
+                    return entry["result"]
+
+        # 2. Slow path: semantic search
         try:
-            from app.services.llm_config import query_embeddings as _qe
-            query_vec = await asyncio.to_thread(_qe.embed_query, query)
+            from app.services.llm_config import embeddings as _qe
+            query_vec = await _qe.aembed_query(query)
         except Exception as e:
             logger.warning("Cache: embedding failed for lookup (%s)", e)
             return None
 
-        now = time.time()
         async with self._lock:
             for entry in self._store:
-                # Version guard: cached result from an older index is stale
                 if entry["index_version"] != index_version:
                     continue
-                # TTL guard
                 if now - entry["timestamp"] > _CACHE_TTL:
                     continue
-                # Similarity check
                 sim = _cosine_similarity(query_vec, entry["embedding"])
                 if sim >= _SIMILARITY_THRESH:
                     logger.info("Cache HIT (similarity=%.4f) for query: %.60s", sim, query)
@@ -82,17 +93,19 @@ class QueryCache:
         logger.debug("Cache MISS for query: %.60s", query)
         return None
 
+
     async def set(self, query: str, result: dict, index_version: int) -> None:
         """Store a query result in the cache."""
         try:
-            from app.services.llm_config import query_embeddings as _qe
-            query_vec = await asyncio.to_thread(_qe.embed_query, query)
+            from app.services.llm_config import embeddings as _qe
+            query_vec = await _qe.aembed_query(query)
         except Exception as e:
             logger.warning("Cache: embedding failed for set (%s) — not caching.", e)
             return
 
         async with self._lock:
             self._store.append({
+                "original_query": query,
                 "embedding":     query_vec,
                 "result":        result,
                 "index_version": index_version,

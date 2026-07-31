@@ -7,11 +7,11 @@
 This report provides an in-depth technical analysis of the existing **Adaptive RAG** prototype and presents a comprehensive upgrade plan designed to transform the system into an enterprise-grade, highly reliable, and daily-useful AI workspace assistant for employees.
 
 ### Key Audit Findings
-The current implementation (`app/api.py`, `app/RAG/graph.py`, `app/RAG/nodes.py`, `app/RAG/prompts.py`) provides an initial proof-of-concept for question categorization (`vague`, `complex`, `concise`) and query transformation using **LangGraph**, **FAISS**, and **Google Gemini**. However, critical architectural limitations prevent it from being production-ready or trusted by employees:
+The current implementation (`app/api.py`, `app/RAG/graph.py`, `app/RAG/nodes.py`, `app/RAG/prompts.py`) provides an initial proof-of-concept for question categorization (`vague`, `complex`, `concise`) and query transformation using **LangGraph**, **Qdrant**, and **Google Gemini**. However, critical architectural limitations prevent it from being production-ready or trusted by employees:
 1. **Broken Frontend Contract**: `app/templates/index.html` calls `/api/status`, but `/api/status` is not defined in `app/api.py`, causing silent JS handling fallbacks.
-2. **Linear Execution Lacking Guardrails**: The LangGraph workflow in `app/RAG/graph.py` is open-loop (linear path from `categorize` -> `rewrite`/`decompose` -> `retrieve` -> `generate` -> `END`). It lacks document relevance grading, hallucination detection, answer quality evaluation, or self-correction loops.
-3. **Loss of Source Metadata**: In `app/RAG/nodes.py:32`, retrieved documents are merged and deduplicated using `set([d.page_content for d in all_docs])`. This completely strips all document metadata (URLs, titles, section headers, timestamps, chunk IDs), making citations impossible.
-4. **Volatile In-Memory Vector Store**: `app/services/storage.py` maintains a single global `vector_store` variable in memory. Uploading or re-indexing documents overwrites the entire store for all concurrent users, with no persistent index or multi-tenant separation.
+2. **Linear Execution Lacking Guardrails**: The LangGraph workflow in `app/RAG/graph.py` was originally open-loop. It originally lacked document relevance grading, hallucination detection, answer quality evaluation, or self-correction loops.
+3. **Loss of Source Metadata**: Initially, retrieved documents were merged and deduplicated using `set([d.page_content for d in all_docs])`. This stripped document metadata. This has been fixed to preserve metadata.
+4. **Volatile In-Memory Vector Store**: Initially, `app/services/storage.py` maintained a single global `vector_store` variable in memory. This has been updated to use a `VectorStoreManager` with locking.
 5. **Inflexible Single-URL Ingestion**: `app/services/loader.py` relies solely on `WebBaseLoader` for web URLs, lacking support for local documents (PDF, DOCX), meeting transcripts (VTT, SRT), email files (.eml), or corporate tools (Confluence, Notion, Slack).
 
 ### Core Upgrade Strategy
@@ -28,15 +28,15 @@ The proposed upgrade plan rebuilds the system around three core pillars:
 
 | Component | Path | Primary Function | Audit Observation & Deficiencies |
 | :--- | :--- | :--- | :--- |
-| **API Web Server** | `app/api.py` | Flask REST API for doc initialization and querying | Uses synchronous Flask wrapping async event loops (`loop = asyncio.new_event_loop()`). Overwrites global state on load. Missing `/api/status` route expected by `index.html:290`. |
-| **Orchestration Graph** | `app/RAG/graph.py` | LangGraph state graph definition | Open-loop, linear execution flow. Lacks document relevance grading, hallucination checks, or self-correction feedback loops. |
-| **Graph Nodes** | `app/RAG/nodes.py` | Execution functions for routing, rewriting, decomposition, retrieval, generation | Sequential retrieval over sub-queries. Text deduplication via `set()` destroys document metadata. Crude token estimation formula (`len/4`). |
+| **API Web Server** | `app/api.py` | FastAPI REST API for doc initialization and querying | Uses FastAPI, but still missing `/api/status` route expected by `index.html:290`. |
+| **Orchestration Graph** | `app/RAG/graph.py` | LangGraph state graph definition | Open-loop initially, but now incorporates relevance and faithfulness checks with a rewrite feedback loop. |
+| **Graph Nodes** | `app/RAG/nodes.py` | Execution functions for routing, rewriting, decomposition, retrieval, generation | Text deduplication has been updated to preserve document metadata. Crude token estimation formula (`len/4`). |
 | **Prompt Templates** | `app/RAG/prompts.py` | ChatPromptTemplates for Gemini | Static string prompts without structured output (JSON/Pydantic) constraints. Query rewriting/decomposition split by `\n` without error handling. |
-| **State Definitions** | `app/RAG/states.py` | TypedDict state container (`GraphState`) | Lacks fields for document metadata, relevance scores, citations, hallucination flags, or user permissions. |
+| **State Definitions** | `app/RAG/states.py` | TypedDict state container (`GraphState`) | Now tracks speculative tasks and answers, but still lacks fields for document metadata, citations, or user permissions. |
 | **Document Loader** | `app/services/loader.py` | `WebBaseLoader` wrapper | Restricted to HTTP/HTTPS URLs. No support for local files, PDFs, DOCX, Markdown, Slack JSON exports, or transcripts. |
-| **Storage & Vector Store**| `app/services/storage.py` | FAISS index management | Single global `vector_store` variable in memory. Overwritten on every request to `/api/initialize`. No persistence (`save_local`), no hybrid search. |
+| **Storage & Vector Store**| `app/services/storage.py` | Qdrant index management | Single global `vector_store` variable in memory. Overwritten on every request to `/api/initialize`. Lacks hybrid search integration in the plan. |
 | **Chunking Strategy** | `app/utils/chunks.py` | Text splitter | `RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)`. Ignores document hierarchy, headers, or code blocks. |
-| **Rate Limiter** | `app/utils/token_bucket.py`| In-memory TokenBucket | Global token bucket (`250k tokens/min`, `5 req/min`). Blocks threads concurrently without per-user or per-tenant tiering. |
+| **Rate Limiter** | `app/utils/token_bucket.py`| In-memory TokenBucket | Global token bucket (`250k tokens/min`, `60 req/min`). Blocks threads concurrently without per-user or per-tenant tiering. |
 
 ### 1.2 Deep-Dive Code Vulnerability & Defect Analysis
 
@@ -54,7 +54,7 @@ async function checkStatus() {
 In `app/api.py`, only `/`, `/api/initialize`, and `/api/query` are defined. Any request to `/api/status` returns a 404 HTML error, causing `response.json()` to throw an exception, forcing the frontend into `enableLoadMode()` on every page refresh even after documents are loaded.
 
 #### Defect 2: Destruction of Document Metadata during Retrieval
-In `app/RAG/nodes.py` (lines 30–33):
+Initially, `app/RAG/nodes.py` contained:
 ```python
 all_docs = []
 for q in queries:
@@ -63,8 +63,9 @@ for q in queries:
 
 context = "\n\n".join(set([d.page_content for d in all_docs]))
 ```
-- Discarding Document Objects: Extracting `d.page_content` into a set strips `d.metadata` (e.g., `source`, `title`, `page`, `chunk_id`).
-- Consequence: The LLM receives raw text blobs without source context. It cannot attribute claims to specific documents or URLs, making verifiable citations impossible.
+- Discarding Document Objects: Extracting `d.page_content` into a set stripped `d.metadata` (e.g., `source`, `title`, `page`, `chunk_id`).
+- Consequence: The LLM received raw text blobs without source context. It could not attribute claims to specific documents or URLs, making verifiable citations impossible.
+- Status: Fixed. Deduplication is now performed using document IDs, preserving metadata.
 
 #### Defect 3: Lack of Verification & Feedback Loops in LangGraph
 In `app/RAG/graph.py` (lines 30–41):
@@ -72,28 +73,31 @@ In `app/RAG/graph.py` (lines 30–41):
 workflow.add_conditional_edges(
     "categorize",
     route_question,
-    {"vague": "rewrite", "complex": "decompose", "concise": "retrieve"}
+    {"vague": "rewrite", "complex": "decompose", "concise": "relevance_grader"}
 )
 workflow.add_edge("rewrite", "retrieve")
 workflow.add_edge("decompose", "retrieve")
-workflow.add_edge("retrieve", "generate")
-workflow.add_edge("generate", END)
+workflow.add_edge("retrieve", "relevance_grader")
+workflow.add_edge("relevance_grader", "generate")
+workflow.add_edge("generate", "faithfulness_checker")
+
+workflow.add_conditional_edges(
+    "faithfulness_checker",
+    route_faithfulness,
+    {
+        "end": END,
+        "rewrite": "rewrite",
+    },
+)
 ```
-- Open-Loop Architecture: Once context is retrieved, execution moves straight to `generate` and `END`.
+- Open-Loop Architecture: While some self-correction was added, the initial report noted the architecture was open-loop.
 - Risk Scenarios:
   - If retrieval returns irrelevant documents, the LLM either hallucinates or returns "I don't have enough information", with no opportunity to re-phrase the search.
   - If the generated answer contains ungrounded claims, there is no validation step to catch hallucinations before returning the answer to the user.
 
 #### Defect 4: Single Global State & Concurrency Race Conditions
-In `app/services/storage.py` (lines 3–8) and `app/api.py` (line 12):
-```python
-vector_store = None # Global variable
-
-def store_chunks(splits):
-    global vector_store
-    vector_store = FAISS.from_documents(splits, embeddings)
-```
-- In a multi-user corporate environment, if Employee A initializes the vector store with HR Policy, and Employee B simultaneously initializes it with IT Guidelines, Employee B's request silently replaces Employee A's index in memory.
+Initially `app/services/storage.py` had a single global `vector_store` that was overwritten on every request.
+This was mitigated by moving to a `VectorStoreManager` with a `_lock` ensuring concurrent requests do not corrupt the internal state.
 
 ---
 
@@ -473,8 +477,8 @@ To ensure the upgrade plan is completely objective, realistic, and resilient aga
 
 | Evaluation Dimension | Identified Risk / Bottleneck in Initial Plan | Objective Optimization & Architectural Safeguard |
 | :--- | :--- | :--- |
-| **1. Latency & LLM Overhead** | Multi-node evaluation loops (Query Rewrite -> HyDE -> Retrieval -> Doc Grader -> Generator -> Hallucination Grader -> Answer Grader) can trigger **5–8 sequential LLM calls**, leading to 8–15 second response latencies. | • **Fast-Path Speculative Execution**: Direct routing for `concise` queries, bypassing HyDE and Hallucination Graders unless retrieval confidence falls below 0.85.<br>• **Tiered Model Strategy**: Use fast, lightweight 8B models (e.g. `gemini-1.5-flash`, `llama-3.1-8b`, or local Cross-Encoders) for grading nodes, reserving heavy LLMs (`gemini-1.5-pro` / `gpt-4o`) exclusively for final response generation.<br>• **Async Parallel Execution**: Execute HyDE expansions, sub-query retrievals, and BM25 sparse queries concurrently via `asyncio.gather`. |
-| **2. Cost & Token Inflation** | Unconstrained query decomposition and full-text context re-evaluations multiply token usage by **3x–6x per user query**, risking budget overruns at scale. | • **Semantic Response Caching**: Implement Redis + GPTCache to serve frequent employee queries (e.g., *"Wi-Fi password"*, *"PTO accrual rate"*, *"holidays list"*) in <50ms with zero LLM token cost.<br>• **Strict Context Budgeting**: Hard cap top-K chunks at 5, enforce maximum sub-query count to 3, and truncate context length dynamically based on token limiters. |
+| **1. Latency & LLM Overhead** | Multi-node evaluation loops (Query Rewrite -> HyDE -> Retrieval -> Doc Grader -> Generator -> Hallucination Grader -> Answer Grader) can trigger **5–8 sequential LLM calls**, leading to 8–15 second response latencies. | • **Fast-Path Speculative Execution**: Execute downstream nodes (Retrieval, Doc Grader, Generator, Faithfulness Grader) concurrently alongside categorization and rewriting using asyncio tasks passed through LangGraph state, hiding latency for the happy path and providing zero-latency retries.<br>• **Tiered Model Strategy**: Use fast, lightweight 8B models (e.g. `gemini-1.5-flash`, `llama-3.1-8b`, or local Cross-Encoders) for grading nodes, reserving heavy LLMs (`gemini-1.5-pro` / `gpt-4o`) exclusively for final response generation.<br>• **Async Parallel Execution**: Execute HyDE expansions, sub-query retrievals, and BM25 sparse queries concurrently via `asyncio.gather`. |
+| **2. Cost & Token Inflation** | Unconstrained query decomposition and full-text context re-evaluations multiply token usage by **3x–6x per user query**, risking budget overruns at scale. | • **Semantic Response Caching**: Implement in-memory semantic caching (QueryCache) keyed by query embedding and index version to skip the entire pipeline for repeated identical or semantically similar queries.<br>• **Strict Context Budgeting**: Hard cap top-K chunks at 5, enforce maximum sub-query count to 3, and truncate context length dynamically based on token limiters. |
 | **3. PII & Data Leakage (DLP)** | Ingesting Slack/Email threads risks indexing sensitive PII (SSNs, personal phone numbers, salary discussions, API keys, passwords). | • **Pre-Vectorization DLP Layer**: Integrate Microsoft Presidio or SpaCy NER into the ingestion pipeline to automatically detect and sanitize/anonymize PII, credentials, and sensitive tokens *before* chunking and vector store insertion. |
 | **4. Tabular Data Loss** | HR policy documents and IT spec sheets rely heavily on tables (e.g., benefits coverage tiers, PTO schedules). Standard text splitters destroy table structure. | • **Table-Aware Parser**: Use `unstructured` or `LlamaIndex` Markdown Table Parsers to extract tables into structured Markdown/HTML blocks with preserved row/column headers. |
 | **5. Thread Conversation Memory** | Single-turn state machines break down when users ask multi-turn follow-ups in Slack/Teams (e.g., *"What about secondary caregivers?"* following a parental leave query). | • **Stateful Thread Store**: Integrate Redis / PostgreSQL conversation state memory into LangGraph, injecting the prior 3 dialogue turns into query rewriting and intent routing. |
