@@ -85,6 +85,7 @@ async def query(req: QueryRequest):
         is_faithful=True,
         relevance_scores=[],
         retrieved_chunks=[],
+        speculative_answer="",
     )
 
     try:

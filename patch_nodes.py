@@ -3,90 +3,78 @@ import re
 with open("app/RAG/nodes.py", "r") as f:
     content = f.read()
 
-# Refactor retrieve logic into _do_retrieve
-retrieve_logic = """
-async def _do_retrieve(queries):
-    store = storage.store_manager.get_vector_store()
-    if store is None:
-        raise ValueError("Vector Store not initialized")
+relevance_grader_str = """
+async def relevance_grader(state):
+    print("---NODE: RELEVANCE GRADER---")
+    chunks = state.get("retrieved_chunks", [])
+    if not chunks:
+        chunks = [c for c in state.get("context", "").split("\n\n") if c.strip()]
 
-    bm25_retriever = storage.store_manager.bm25_retriever
-    retriever = store.as_retriever(search_kwargs={"k": 5})
+    if not chunks:
+        return {"relevance_scores": [], "context": "", "speculative_answer": ""}
 
-    all_docs = []
+    formatted_chunks = "\\n---\\n".join([f"Chunk {i+1}:\\n{chunk}" for i, chunk in enumerate(chunks)])
 
-    async def process_query(q):
-        dense_coro = retriever.ainvoke(q)
-        if bm25_retriever:
-            sparse_coro = bm25_retriever.ainvoke(q)
-            dense_docs, sparse_results = await asyncio.gather(dense_coro, sparse_coro)
-        else:
-            dense_docs = await dense_coro
-            sparse_results = []
-        fused_docs = storage.store_manager.reciprocal_rank_fusion(dense_docs, sparse_results)
-        return fused_docs[:5]
+    # Fire both concurrently! We want to speculatively generate an answer assuming all chunks are relevant
+    grade_coro = (relevance_prompt | llm | StrOutputParser()).ainvoke({
+        "question": state["question"],
+        "chunks": formatted_chunks,
+    })
+    
+    unfiltered_context = "\\n\\n".join(chunks)
+    generate_coro = (prompt | llm | StrOutputParser()).ainvoke({
+        "context": unfiltered_context,
+        "question": state["question"],
+    })
 
-    results = await asyncio.gather(*(process_query(q) for q in queries))
-    for fused_docs in results:
-        all_docs.extend(fused_docs)
+    grade_task = asyncio.create_task(grade_coro)
+    generate_task = asyncio.create_task(generate_coro)
+    
+    # We must wait for grade_task no matter what
+    res = await grade_task
+    scores = parse_json_bool_array(res, len(chunks))
 
-    unique_docs = {}
-    for d in all_docs:
-        chunk_id = d.metadata.get("chunk_id", d.page_content)
-        if chunk_id not in unique_docs:
-            unique_docs[chunk_id] = d
+    relevant_chunks = [chunk for chunk, is_rel in zip(chunks, scores) if is_rel]
+    if not relevant_chunks:
+        filtered_context = ""
+    else:
+        filtered_context = "\\n\\n".join(relevant_chunks)
 
-    unique_contents = []
-    for d in unique_docs.values():
-        meta = d.metadata
-        url = meta.get("source_url", "N/A")
-        title = meta.get("document_title", "N/A")
-        heading = meta.get("section_heading", "N/A")
-        content = f"Source: {url}\\nTitle: {title}\\nHeading: {heading}\\nContent: {d.page_content}"
-        unique_contents.append(content)
-
-    context = "\\n\\n".join(unique_contents)
-    return {"context": context, "retrieved_chunks": unique_contents}
-
-async def retrieve_context(state):
-    print("---NODE: RETRIEVE---")
-    queries = state.get("rewritten_queries", []) + state.get("sub_queries", [])
-    if not queries:
-        queries = [state["question"]]
-    return await _do_retrieve(queries)
+    # If ALL chunks were relevant, the speculative answer is perfectly valid!
+    if all(scores) and len(scores) == len(chunks):
+        # We need the speculative answer, so we wait for it
+        speculative_ans = await generate_task
+        return {"context": filtered_context, "relevance_scores": scores, "speculative_answer": speculative_ans}
+    else:
+        # We don't need it. We can cancel it to save resources!
+        generate_task.cancel()
+        return {"context": filtered_context, "relevance_scores": scores, "speculative_answer": ""}
 """
 
-# Replace old retrieve_context
-old_retrieve_start = content.find("async def retrieve_context(state):")
-old_retrieve_end = content.find("async def relevance_grader(state):")
-content = content[:old_retrieve_start] + retrieve_logic + "\n\n" + content[old_retrieve_end:]
-
-# Replace categorize_question
-old_categorize = """async def categorize_question(state):
-    print("---NODE: CATEGORIZE---")
-    res = await (categorize_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
-    category = res.strip().lower()
-    return {"category": category}"""
-
-new_categorize = """async def categorize_question(state):
-    print("---NODE: CATEGORIZE---")
+generate_answer_str = """
+async def generate_answer(state):
+    print("---NODE: GENERATE---")
     
-    async def get_category():
-        res = await (categorize_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
-        return res.strip().lower()
+    speculative_ans = state.get("speculative_answer", "")
+    if speculative_ans:
+        print("---USING SPECULATIVE ANSWER---")
+        return {"answer": speculative_ans}
         
-    category, retrieved_data = await asyncio.gather(
-        get_category(),
-        _do_retrieve([state["question"]])
-    )
-    
-    return {
-        "category": category,
-        "context": retrieved_data["context"],
-        "retrieved_chunks": retrieved_data["retrieved_chunks"]
-    }"""
+    tokens = (len(state["question"]) + len(state.get("context", ""))) // 4
+    await GEN_LLM_LIMITER.acquire(max(tokens, 1))
 
-content = content.replace(old_categorize, new_categorize)
+    ans = await (prompt | llm | StrOutputParser()).ainvoke({
+        "context": state.get("context", ""),
+        "question": state["question"],
+    })
+    return {"answer": ans}
+"""
+
+old_relevance = re.search(r'async def relevance_grader.*?return \{"context": filtered_context, "relevance_scores": scores\}', content, re.DOTALL).group(0)
+old_generate = re.search(r'async def generate_answer.*?return \{"answer": ans\}', content, re.DOTALL).group(0)
+
+content = content.replace(old_relevance, relevance_grader_str.strip())
+content = content.replace(old_generate, generate_answer_str.strip())
 
 with open("app/RAG/nodes.py", "w") as f:
     f.write(content)
