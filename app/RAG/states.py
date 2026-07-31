@@ -14,7 +14,7 @@ class GraphState(TypedDict, total=False):
     speculative_answer: str
     speculative_vague_task: Any
     speculative_complex_task: Any
-    speculative_concise_task: Any
+    speculative_retrieve_task: Any
     speculative_grade_task: Any
     speculative_generate_task: Any
     speculative_faithfulness_task: Any

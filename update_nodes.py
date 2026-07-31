@@ -3,62 +3,9 @@ import re
 with open('app/RAG/nodes.py', 'r') as f:
     content = f.read()
 
-# We will replace _do_retrieve_grade_generate and _do_rewrite_and_retrieve_grade_generate
-old_funcs = """async def _do_retrieve_grade_generate(queries, question):
-    retrieved_data = await _do_retrieve(queries)
-    chunks = retrieved_data["retrieved_chunks"]
-
-    if not chunks:
-        async def empty_grade(): return "[]"
-        async def empty_gen(): return ""
-        async def empty_faith(): return "yes"
-        return retrieved_data, asyncio.create_task(empty_grade()), asyncio.create_task(empty_gen()), asyncio.create_task(empty_faith())
-
-    formatted_chunks = "\\n---\\n".join([f"Chunk {i+1}:\\n{chunk}" for i, chunk in enumerate(chunks)])
-    unfiltered_context = "\\n\\n".join(chunks)
-
-    async def run_grade():
-        return await (relevance_prompt | llm | StrOutputParser()).ainvoke({
-            "question": question,
-            "chunks": formatted_chunks,
-        })
-
-    async def run_generate():
-        if not unfiltered_context.strip():
-            return "I don't have enough information in the retrieved context."
-        tokens = (len(question) + len(unfiltered_context)) // 4
-        await GEN_LLM_LIMITER.acquire(max(tokens, 1))
-        return await (prompt | llm | StrOutputParser()).ainvoke({
-            "context": unfiltered_context,
-            "question": question,
-        })
-
-    grade_task = asyncio.create_task(run_grade())
-    generate_task = asyncio.create_task(run_generate())
-
-    async def run_faithfulness():
-        try:
-            ans = await generate_task
-        except asyncio.CancelledError:
-            raise
-        if not unfiltered_context.strip():
-            return "yes"
-        return await (faithfulness_prompt | llm | StrOutputParser()).ainvoke({
-            "context": unfiltered_context,
-            "answer": ans,
-        })
-
-    faith_task = asyncio.create_task(run_faithfulness())
-
-    return retrieved_data, grade_task, generate_task, faith_task
-
-async def _do_rewrite_and_retrieve_grade_generate(question):
-    res = await (rewrite_prompt | llm | StrOutputParser()).ainvoke({"question": question})
-    queries = [q.strip() for q in res.split("\\n") if q.strip()]
-    ret_data, grade_task, gen_task, faith_task = await _do_retrieve_grade_generate(queries, question)
-    return queries, ret_data, grade_task, gen_task, faith_task"""
-
-new_funcs = """def _start_retrieve_grade_generate(queries, question):
+# Replace _do_retrieve_grade_generate with _start_retrieve_grade_generate
+new_start_retrieve = """
+def _start_retrieve_grade_generate(queries, question):
     retrieve_task = asyncio.create_task(_do_retrieve(queries))
     
     async def run_grade():
@@ -112,20 +59,13 @@ async def _start_rewrite_and_retrieve_grade_generate(question):
     res = await (rewrite_prompt | llm | StrOutputParser()).ainvoke({"question": question})
     queries = [q.strip() for q in res.split("\\n") if q.strip()]
     retrieve_task, grade_task, gen_task, faith_task = _start_retrieve_grade_generate(queries, question)
-    return queries, retrieve_task, grade_task, gen_task, faith_task"""
+    return queries, retrieve_task, grade_task, gen_task, faith_task
+"""
 
-if old_funcs not in content:
-    print("COULD NOT FIND OLD FUNCS")
-else:
-    content = content.replace(old_funcs, new_funcs)
+content = re.sub(r'async def _do_retrieve_grade_generate.*?async def _do_rewrite_and_retrieve_grade_generate.*?return queries, ret_data, grade_task, gen_task, faith_task', new_start_retrieve, content, flags=re.DOTALL)
 
-# Now rewrite_query
-old_rewrite = """async def rewrite_query(state):
-    print("---NODE: REWRITE---")
-    speculative_vague = state.get("speculative_vague_task")
-    speculative_fallback = state.get("speculative_rewrite_fallback_task")
-    retry_count = state.get("retry_count", 0)
-    
+# Update rewrite_query
+old_rewrite = """
     if speculative_vague and retry_count == 0:
         print("---USING SPECULATIVE VAGUE TASK---")
         try:
@@ -169,12 +109,7 @@ old_rewrite = """async def rewrite_query(state):
         "context": "",
     }"""
 
-new_rewrite = """async def rewrite_query(state):
-    print("---NODE: REWRITE---")
-    speculative_vague = state.get("speculative_vague_task")
-    speculative_fallback = state.get("speculative_rewrite_fallback_task")
-    retry_count = state.get("retry_count", 0)
-    
+new_rewrite = """
     if speculative_vague and retry_count == 0:
         print("---USING SPECULATIVE VAGUE TASK---")
         try:
@@ -217,16 +152,10 @@ new_rewrite = """async def rewrite_query(state):
         "context": "",
     }"""
 
-if old_rewrite not in content:
-    print("COULD NOT FIND OLD REWRITE")
-else:
-    content = content.replace(old_rewrite, new_rewrite)
+content = content.replace(old_rewrite, new_rewrite)
 
-old_decompose = """async def decompose_query(state):
-    print("---NODE: DECOMPOSE---")
-    speculative_complex = state.get("speculative_complex_task")
-    retry_count = state.get("retry_count", 0)
-    
+# Update decompose_query
+old_decompose = """
     if speculative_complex and retry_count == 0:
         print("---USING SPECULATIVE COMPLEX TASK---")
         try:
@@ -252,11 +181,8 @@ old_decompose = """async def decompose_query(state):
         "retrieved_chunks": [],
         "context": "",
     }"""
-new_decompose = """async def decompose_query(state):
-    print("---NODE: DECOMPOSE---")
-    speculative_complex = state.get("speculative_complex_task")
-    retry_count = state.get("retry_count", 0)
-    
+
+new_decompose = """
     if speculative_complex and retry_count == 0:
         print("---USING SPECULATIVE COMPLEX TASK---")
         try:
@@ -282,54 +208,15 @@ new_decompose = """async def decompose_query(state):
         "retrieved_chunks": [],
         "context": "",
     }"""
-if old_decompose not in content:
-    print("COULD NOT FIND OLD DECOMPOSE")
-else:
-    content = content.replace(old_decompose, new_decompose)
 
-old_retrieve = """async def retrieve_context(state):
-    print("---NODE: RETRIEVE---")
-    
-    chunks = state.get("retrieved_chunks", [])
-    context = state.get("context", "")
-    
-    if chunks and context:
-        print("---USING SPECULATIVE RETRIEVAL---")
-        return {"context": context, "retrieved_chunks": chunks}
+content = content.replace(old_decompose, new_decompose)
 
-    queries = state.get("rewritten_queries", []) + state.get("sub_queries", [])
-    if not queries:
-        queries = [state["question"]]
-    return await _do_retrieve(queries)"""
-new_retrieve = """async def retrieve_context(state):
-    print("---NODE: RETRIEVE---")
-    
-    spec_ret = state.get("speculative_retrieve_task")
-    if spec_ret:
-        print("---USING SPECULATIVE RETRIEVAL TASK---")
-        try:
-            ret_data = await spec_ret
-            return {"context": ret_data["context"], "retrieved_chunks": ret_data["retrieved_chunks"]}
-        except Exception as e:
-            print(f"---SPECULATIVE RETRIEVAL TASK FAILED: {e}---")
-        
-    chunks = state.get("retrieved_chunks", [])
-    context = state.get("context", "")
-    
-    if chunks and context:
-        print("---USING SPECULATIVE RETRIEVAL---")
-        return {"context": context, "retrieved_chunks": chunks}
+# Update categorize_question
+old_cat = """    async def get_category():
+        res = await (categorize_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
+        return res.strip().lower()
 
-    queries = state.get("rewritten_queries", []) + state.get("sub_queries", [])
-    if not queries:
-        queries = [state["question"]]
-    return await _do_retrieve(queries)"""
-if old_retrieve not in content:
-    print("COULD NOT FIND OLD RETRIEVE")
-else:
-    content = content.replace(old_retrieve, new_retrieve)
-
-old_cat = """    async def get_rewritten_and_retrieve():
+    async def get_rewritten_and_retrieve():
         return await _do_rewrite_and_retrieve_grade_generate(state["question"])
 
     async def get_decomposed_and_retrieve():
@@ -377,7 +264,12 @@ old_cat = """    async def get_rewritten_and_retrieve():
             "speculative_concise_task": concise_task,
             "speculative_rewrite_fallback_task": rewrite_task,
         }"""
-new_cat = """    async def get_rewritten_and_retrieve():
+
+new_cat = """    async def get_category():
+        res = await (categorize_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
+        return res.strip().lower()
+
+    async def get_rewritten_and_retrieve():
         return await _start_rewrite_and_retrieve_grade_generate(state["question"])
 
     async def get_decomposed_and_retrieve():
@@ -422,11 +314,50 @@ new_cat = """    async def get_rewritten_and_retrieve():
             "speculative_faithfulness_task": c_faith,
             "speculative_rewrite_fallback_task": rewrite_task,
         }"""
-if old_cat not in content:
-    print("COULD NOT FIND OLD CAT")
-else:
-    content = content.replace(old_cat, new_cat)
 
+content = content.replace(old_cat, new_cat)
+
+
+# Update retrieve_context
+old_retrieve_context = """async def retrieve_context(state):
+    print("---NODE: RETRIEVE---")
+    
+    chunks = state.get("retrieved_chunks", [])
+    context = state.get("context", "")
+    
+    if chunks and context:
+        print("---USING SPECULATIVE RETRIEVAL---")
+        return {"context": context, "retrieved_chunks": chunks}
+
+    queries = state.get("rewritten_queries", []) + state.get("sub_queries", [])
+    if not queries:
+        queries = [state["question"]]
+    return await _do_retrieve(queries)"""
+
+new_retrieve_context = """async def retrieve_context(state):
+    print("---NODE: RETRIEVE---")
+    
+    spec_ret = state.get("speculative_retrieve_task")
+    if spec_ret:
+        print("---USING SPECULATIVE RETRIEVAL TASK---")
+        ret_data = await spec_ret
+        return {"context": ret_data["context"], "retrieved_chunks": ret_data["retrieved_chunks"]}
+        
+    chunks = state.get("retrieved_chunks", [])
+    context = state.get("context", "")
+    
+    if chunks and context:
+        print("---USING SPECULATIVE RETRIEVAL---")
+        return {"context": context, "retrieved_chunks": chunks}
+
+    queries = state.get("rewritten_queries", []) + state.get("sub_queries", [])
+    if not queries:
+        queries = [state["question"]]
+    return await _do_retrieve(queries)"""
+
+content = content.replace(old_retrieve_context, new_retrieve_context)
+
+# Update relevance_grader
 old_grader = """async def relevance_grader(state):
     print("---NODE: RELEVANCE GRADER---")
     
@@ -479,6 +410,7 @@ old_grader = """async def relevance_grader(state):
                     "answer": ans,
                 })
             faith_task = asyncio.create_task(_speculative_faithfulness())"""
+
 new_grader = """async def relevance_grader(state):
     print("---NODE: RELEVANCE GRADER---")
     
@@ -487,12 +419,9 @@ new_grader = """async def relevance_grader(state):
         spec_ret = state.get("speculative_retrieve_task")
         if spec_ret:
             print("---USING SPECULATIVE RETRIEVAL TASK IN GRADER---")
-            try:
-                ret_data = await spec_ret
-                chunks = ret_data["retrieved_chunks"]
-            except Exception as e:
-                print(f"---SPECULATIVE RETRIEVAL TASK FAILED IN GRADER: {e}---")
-        if not chunks:
+            ret_data = await spec_ret
+            chunks = ret_data["retrieved_chunks"]
+        else:
             chunks = [c for c in state.get("context", "").split("\\n\\n") if c.strip()]
             
     if state.get("speculative_grade_task") and state.get("speculative_generate_task") and state.get("speculative_faithfulness_task"):
@@ -532,10 +461,8 @@ new_grader = """async def relevance_grader(state):
                 "answer": ans,
             })
         faith_task = asyncio.create_task(_speculative_faithfulness())"""
-if old_grader not in content:
-    print("COULD NOT FIND OLD GRADER")
-else:
-    content = content.replace(old_grader, new_grader)
+
+content = content.replace(old_grader, new_grader)
 
 with open('app/RAG/nodes.py', 'w') as f:
     f.write(content)
