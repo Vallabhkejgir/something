@@ -32,7 +32,7 @@ The proposed upgrade plan rebuilds the system around three core pillars:
 | **Orchestration Graph** | `app/RAG/graph.py` | LangGraph state graph definition | Open-loop initially, but now incorporates relevance and faithfulness checks with a rewrite feedback loop. |
 | **Graph Nodes** | `app/RAG/nodes.py` | Execution functions for routing, rewriting, decomposition, retrieval, generation | Text deduplication has been updated to preserve document metadata. Crude token estimation formula (`len/4`). |
 | **Prompt Templates** | `app/RAG/prompts.py` | ChatPromptTemplates for Gemini | Static string prompts without structured output (JSON/Pydantic) constraints. Query rewriting/decomposition split by `\n` without error handling. |
-| **State Definitions** | `app/RAG/states.py` | TypedDict state container (`GraphState`) | Lacks fields for document metadata, relevance scores, citations, hallucination flags, or user permissions. |
+| **State Definitions** | `app/RAG/states.py` | TypedDict state container (`GraphState`) | Now tracks speculative tasks and answers, but still lacks fields for document metadata, citations, or user permissions. |
 | **Document Loader** | `app/services/loader.py` | `WebBaseLoader` wrapper | Restricted to HTTP/HTTPS URLs. No support for local files, PDFs, DOCX, Markdown, Slack JSON exports, or transcripts. |
 | **Storage & Vector Store**| `app/services/storage.py` | Qdrant index management | Single global `vector_store` variable in memory. Overwritten on every request to `/api/initialize`. Lacks hybrid search integration in the plan. |
 | **Chunking Strategy** | `app/utils/chunks.py` | Text splitter | `RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)`. Ignores document hierarchy, headers, or code blocks. |
