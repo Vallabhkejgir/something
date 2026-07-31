@@ -36,7 +36,7 @@ The proposed upgrade plan rebuilds the system around three core pillars:
 | **Document Loader** | `app/services/loader.py` | `WebBaseLoader` wrapper | Restricted to HTTP/HTTPS URLs. No support for local files, PDFs, DOCX, Markdown, Slack JSON exports, or transcripts. |
 | **Storage & Vector Store**| `app/services/storage.py` | Qdrant index management | Single global `vector_store` variable in memory. Overwritten on every request to `/api/initialize`. Lacks hybrid search integration in the plan. |
 | **Chunking Strategy** | `app/utils/chunks.py` | Text splitter | `RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=100)`. Ignores document hierarchy, headers, or code blocks. |
-| **Rate Limiter** | `app/utils/token_bucket.py`| In-memory TokenBucket | Global token bucket (`250k tokens/min`, `5 req/min`). Blocks threads concurrently without per-user or per-tenant tiering. |
+| **Rate Limiter** | `app/utils/token_bucket.py`| In-memory TokenBucket | Global token bucket (`250k tokens/min`, `60 req/min`). Blocks threads concurrently without per-user or per-tenant tiering. |
 
 ### 1.2 Deep-Dive Code Vulnerability & Defect Analysis
 
