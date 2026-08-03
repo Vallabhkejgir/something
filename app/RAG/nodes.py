@@ -136,7 +136,8 @@ async def relevance_grader(state):
     relevant_chunks = [chunk for chunk, is_rel in zip(chunks, scores) if is_rel]
     if not relevant_chunks:
         relevant_chunks = chunks[:3]
-        
+        scores = [True] * len(relevant_chunks) + [False] * (len(chunks) - len(relevant_chunks))
+
     if not relevant_chunks:
         filtered_context = ""
     else:
