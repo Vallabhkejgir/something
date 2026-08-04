@@ -3,6 +3,7 @@ import asyncio
 from typing import List
 from langchain_core.output_parsers import StrOutputParser
 from app.services.llm_config import llm, GEN_LLM_LIMITER
+from app.RAG.reranker import rerank
 from app.RAG.prompts import (
     prompt,
     rewrite_prompt,
@@ -102,8 +103,14 @@ async def retrieve_context(state):
         if chunk_id not in unique_docs:
             unique_docs[chunk_id] = d
 
+    reranked_docs, _ = await rerank(
+        query=state["question"],
+        docs=list(unique_docs.values()),
+        top_n=7
+    )
+
     unique_contents = []
-    for d in unique_docs.values():
+    for d in reranked_docs:
         meta = d.metadata
         url = meta.get("source_url", "N/A")
         title = meta.get("document_title", "N/A")
