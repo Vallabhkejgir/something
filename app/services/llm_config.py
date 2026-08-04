@@ -16,4 +16,4 @@ GEN_LLM_LIMITER = TokenBucket(max_tokens_per_min=250_000, max_requests_per_min=5
 
 # Aliases for fast LLM components
 fast_llm = llm
-FAST_LLM_LIMITER = GEN_LLM_LIMITER
+FAST_LLM_LIMITER = TokenBucket(max_tokens_per_min=250_000, max_requests_per_min=5)
