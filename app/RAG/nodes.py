@@ -50,7 +50,7 @@ def parse_json_bool_array(text: str, default_length: int) -> List[bool]:
 async def rewrite_query(state):
     print("---NODE: REWRITE---")
     res = await (rewrite_prompt | llm | StrOutputParser()).ainvoke({"question": state["question"]})
-    return {"rewritten_queries": [q.strip() for q in res.split("\n") if q.strip()]}
+    return {"rewritten_queries": [res.strip()]}
 
 
 async def decompose_query(state):
@@ -67,7 +67,7 @@ async def retrieve_context(state):
 
     bm25_retriever = storage.store_manager.bm25_retriever
 
-    retriever = store.as_retriever(search_kwargs={"k": 5})
+    retriever = store.as_retriever(search_kwargs={"k": 10})
 
     queries = state.get("rewritten_queries", []) + state.get("sub_queries", [])
     if not queries:
@@ -75,19 +75,26 @@ async def retrieve_context(state):
 
     all_docs = []
 
+    tasks = []
     for q in queries:
-        # Dense Retrieval
-        dense_docs = await retriever.ainvoke(q)
+        tasks.append(retriever.ainvoke(q))
+        if bm25_retriever:
+            tasks.append(bm25_retriever.ainvoke(q))
 
-        # Sparse Retrieval (BM25)
+    results = await asyncio.gather(*tasks)
+
+    idx = 0
+    for q in queries:
+        dense_docs = results[idx]
+        idx += 1
+        
         sparse_results = []
         if bm25_retriever:
-            sparse_results = await bm25_retriever.ainvoke(q)
-
-        # RRF Fusion
+            sparse_results = results[idx]
+            idx += 1
+            
         fused_docs = storage.store_manager.reciprocal_rank_fusion(dense_docs, sparse_results)
-        # Take top 5 from fused results
-        all_docs.extend(fused_docs[:5])
+        all_docs.extend(fused_docs[:10])
 
     unique_docs = {}
     for d in all_docs:
@@ -127,6 +134,10 @@ async def relevance_grader(state):
     scores = parse_json_bool_array(res, len(chunks))
 
     relevant_chunks = [chunk for chunk, is_rel in zip(chunks, scores) if is_rel]
+    if not relevant_chunks:
+        relevant_chunks = chunks[:3]
+        scores = [True] * len(relevant_chunks) + [False] * (len(chunks) - len(relevant_chunks))
+
     if not relevant_chunks:
         filtered_context = ""
     else:

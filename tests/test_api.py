@@ -19,11 +19,13 @@ def test_query_uninitialized():
     assert response.status_code == 400
     assert response.json()["error"] == "Load docs first"
 
+from langchain_core.documents import Document
+
 @patch("app.api.Doc_loader")
-@patch("app.api.process_elements")
-@patch("app.api.store_chunks")
-def test_initialize_and_query(mock_store, mock_chunk, mock_loader):
-    mock_loader.return_value = ["doc"]
+@patch("app.api.process_elements", new_callable=AsyncMock)
+@patch("app.api.store_manager.add_documents", new_callable=AsyncMock)
+def test_initialize_and_query(mock_add_documents, mock_chunk, mock_loader):
+    mock_loader.return_value = [Document(page_content="doc content", metadata={"section_heading": "heading"})]
     mock_chunk.return_value = ["chunk"]
 
     init_response = client.post("/api/initialize", json={"doc_url": "https://example.com"})

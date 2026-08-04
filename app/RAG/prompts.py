@@ -18,14 +18,10 @@ Do not add external knowledge.
 """
 
 rewrite_template = """
-You generate search queries for a vector database.
+You are an expert search assistant.
+Rewrite the following question into a single, highly descriptive and clear search query that adds necessary context to improve retrieval from a vector database.
 
-Generate exactly 3 alternative search queries that:
-- Preserve the original meaning
-- Use different wording or focus on different aspects
-- Are concise (max 12 words each)
-
-Return ONLY a newline-separated list. No numbering. No explanations.
+Return ONLY the rewritten query. No explanations.
 
 Original question:
 {question}
