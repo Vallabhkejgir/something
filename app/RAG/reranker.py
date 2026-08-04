@@ -18,6 +18,7 @@ from typing import List, Tuple
 
 from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage
+from langchain_core.output_parsers import StrOutputParser
 
 from app.services.llm_config import fast_llm, FAST_LLM_LIMITER
 
@@ -87,8 +88,8 @@ async def rerank(
         token_est = len(prompt) // 4 + 100
         await FAST_LLM_LIMITER.acquire(token_est)
 
-        response = await fast_llm.ainvoke([HumanMessage(content=prompt)])
-        raw = response.content.strip()
+        response = await (fast_llm | StrOutputParser()).ainvoke([HumanMessage(content=prompt)])
+        raw = response.strip()
 
         # Strip markdown fences
         if raw.startswith("```"):
